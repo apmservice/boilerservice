@@ -19,12 +19,21 @@ html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#e6eaee;font
 }
 .pg{display:none;padding:14px;background:#fff;min-height:100%}
 .pg.on{display:block}
-.data-bar{display:flex;gap:6px;padding:8px 14px;background:#f0f4f8;border-bottom:1px solid #dde4ea;flex-wrap:wrap;align-items:center}
-.data-bar-title{font-size:11px;color:#888;font-weight:700;flex:1;min-width:100px}
-.dbar-btn{padding:6px 12px;border-radius:8px;border:none;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:4px;white-space:nowrap}
+.data-bar{display:flex;gap:4px;padding:6px 10px;background:#f0f4f8;border-bottom:1px solid #dde4ea;flex-wrap:wrap;align-items:center}
+.data-bar-title{font-size:10px;color:#888;font-weight:700;flex:1;min-width:90px}
+.dbar-select{height:26px;padding:4px 8px;border:1px solid #cfd8e3;border-radius:7px;font-size:10px;font-weight:700;background:#fff;color:#333;min-width:190px;max-width:280px;outline:none}
+.dbar-select:focus{border-color:var(--g)}
+.sync-pill{padding:4px 8px;border-radius:999px;font-size:9px;font-weight:700;display:flex;align-items:center;gap:5px;white-space:nowrap;background:#eef2f6;color:#667085;border:1px solid #d0d7de;min-height:24px}
+.sync-pill::before{content:"☁️"}
+.sync-pill.ok{background:#e8f7ee;color:#177245;border-color:#b9e2c6}
+.sync-pill.go{background:#fff4db;color:#9a6700;border-color:#f3d08b}
+.sync-pill.warn{background:#f5f5f5;color:#666;border-color:#ddd}
+.sync-pill.err{background:#fdecec;color:#b42318;border-color:#f3b7b7}
+.dbar-btn{padding:4px 8px;border-radius:7px;border:none;font-size:8px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:3px;white-space:nowrap;min-height:24px;line-height:1}
 .dbar-btn:active{opacity:.7}
 .db-exp{background:#1565c0;color:#fff}
 .db-imp{background:#21a366;color:#fff}
+.db-clear{background:#d9534f;color:#fff}
 .htitle{font-size:18px;font-weight:700;color:var(--g)}
 .hsub{font-size:12px;color:#999;margin-bottom:12px}
 .sbox{background:#f4f8f4;border:1px solid #c3e0cc;border-radius:10px;padding:14px;margin-bottom:12px}
@@ -210,6 +219,19 @@ html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#e6eaee;font
   <div class="spin"></div>
   <div style="font-size:14px;color:#555;font-weight:700">กำลังโหลดข้อมูล…</div>
 </div>
+<script>
+window.__loaderFailSafe = true;
+(function(){
+  function hideLoader(){
+    var el = document.getElementById('loadingCover');
+    if(el) el.classList.add('hide');
+  }
+  window.addEventListener('error', hideLoader);
+  window.addEventListener('unhandledrejection', hideLoader);
+  document.addEventListener('DOMContentLoaded', function(){ setTimeout(hideLoader, 2200); });
+  setTimeout(hideLoader, 4000);
+})();
+</script>
 <div class="pdf-progress" id="pdfProgress">
   <div class="pdf-prog-box">
     <div class="pdf-prog-title">📄 กำลังสร้าง PDF รวม…</div>
@@ -220,9 +242,17 @@ html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#e6eaee;font
 </div>
 <div class="app">
   <div class="data-bar">
-    <div class="data-bar-title">💾 ข้อมูลฝังใน File นี้</div>
-    <button class="dbar-btn db-exp" onclick="exportData()">📤 Export ข้อมูล</button>
-    <button class="dbar-btn db-imp" onclick="document.getElementById('impFile').click()">📥 Import ข้อมูล</button>
+    <div class="data-bar-title">💾 ข้อมูลในเครื่อง</div>
+    <select id="topCommand" class="dbar-select" onchange="handleTopCommand(this)">
+      <option value="">เลือกคำสั่ง…</option>
+      <option value="export">📤 Export ข้อมูล</option>
+      <option value="import">📥 Import ข้อมูล</option>
+      <option value="clearall">🗑️ ล้างข้อมูลทั้งหมด</option>
+      
+      
+      
+      
+    </select>
     <input type="file" id="impFile" accept=".json" style="display:none" onchange="importData(this)"/>
   </div>
   <div class="zone" id="zone"></div>
@@ -307,6 +337,21 @@ html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#e6eaee;font
 <script>
 const FILE_ID="SCGP_BS_%%FILEID%%";
 const _FID=FILE_ID.includes('%%')?(()=>{const k='_scgp_fid';let id=sessionStorage.getItem(k);if(!id){id='FID_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);sessionStorage.setItem(k,id);}return id;})():FILE_ID;
+const FB_DISABLED = true;
+window.handleTopCommand = async function(sel){
+ const v = sel && sel.value ? sel.value : '';
+ if (!v) return;
+ try {
+  if (v === 'export') await exportData();
+  else if (v === 'import') document.getElementById('impFile').click();
+  else if (v === 'clearall') await clearAllSheets();
+ } catch (e) {
+  console.error(e);
+  toast((e && (e.message || e)) || 'เกิดข้อผิดพลาด');
+ } finally {
+  if (sel) sel.value = '';
+ }
+};
 
 function scgpHeaderHTML(){
  return `<div style="position:relative;display:flex;align-items:center;justify-content:center;padding:6px 0 10px 0 0;margin-bottom:10px;border-bottom:2px solid #1565c0;min-height:74px;"> 
@@ -1612,6 +1657,27 @@ function nextNo() {
   return nums.length ? Math.max(...nums) + 1 : 1;
 }
 
+window.clearAllSheets = async function(){
+  const nonS = sheetIds.filter(id => id !== 'summary');
+  const total = nonS.length;
+  const hasSummary = !!((await dbGet('summary_title')) || (await dbGet('summary_inspector')));
+  if (!total && !hasSummary) { toast('⚠️ ไม่มีข้อมูลให้ล้าง'); return; }
+  if (!confirm(`ล้างข้อมูลทุก Sheet ทั้งหมด ${total} รายการ รวมถึงข้อมูลหน้า Summary และรูปภาพทั้งหมด?`)) return;
+  for (const rid of [...nonS]) {
+    const m = await getMeta(rid);
+    for (const iid of (m.imgIds || [])) await delImg(iid);
+    await delMeta(rid);
+  }
+  await dbDel('summary_title');
+  await dbDel('summary_inspector');
+  sheetIds = ['summary'];
+  await saveSheetsList(sheetIds);
+  active = 'summary';
+  await renderAll();
+  
+  toast('🗑️ ล้างข้อมูลทั้งหมดแล้ว');
+};
+
 document.getElementById('btnAdd').onclick = async () => {
   const n = nextNo(), id = 'no-' + n;
   sheetIds.push(id);
@@ -1652,8 +1718,10 @@ async function init() {
     if (!sheetIds.includes('summary')) sheetIds.unshift('summary');
     if (!sheetIds.includes(active)) active = 'summary';
     await renderAll();
+    
   } catch (e) {
-    document.getElementById('zone').innerHTML = '<div style="padding:20px;color:red">เกิดข้อผิดพลาด กรุณา Refresh</div>';
+    console.error(e);
+    document.getElementById('zone').innerHTML = '<div style="padding:20px;color:#b42318;font-weight:700">เกิดข้อผิดพลาด กรุณา Refresh</div><div style="padding:0 20px 20px 20px;color:#666;font-size:12px;word-break:break-word">' + (e && (e.message || e)) + '</div>';
   } finally {
     document.getElementById('loadingCover').classList.add('hide');
   }
