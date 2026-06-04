@@ -292,7 +292,14 @@ window.__loaderFailSafe = true;
     <button class="ed-tool"   id="etLine"   onclick="setTool('line')"  >╱</button>
     <button class="ed-tool"   id="etText"   onclick="setTool('text')"  >T</button>
     <button class="ed-tool"   id="etNum"    onclick="setTool('number')">①</button>
-    <button class="ed-tool"   id="etSym"    onclick="toggleSymPicker()">★</button>
+    <button class="ed-tool no-border" id="etCheck"
+  onclick="setSym('✅'); setTool('symbol');"
+  title="เครื่องหมายถูก">✅</button>
+
+<button class="ed-tool no-border" id="etCross"
+  onclick="setSym('✕'); setTool('symbol');"
+  title="เครื่องหมายผิด"
+  style="border:none;outline:none;box-shadow:none;color:#cc0000;font-weight:bold;">✕</button>
     <div class="ed-sep"></div>
     <button class="ed-tool" onclick="edUndo()">↩️</button>
     <button class="ed-tool" onclick="edClearAnnot()">🗑️</button>
@@ -305,7 +312,6 @@ window.__loaderFailSafe = true;
       <button class="sym-btn" onclick="setSym('🔴')">🔴</button>
       <button class="sym-btn" onclick="setSym('🟡')">🟡</button>
       <button class="sym-btn" onclick="setSym('🟢')">🟢</button>
-      <button class="sym-btn" onclick="setSym('⭐')">⭐</button>
       <button class="sym-btn" onclick="setSym('📌')">📌</button>
       <button class="sym-btn" onclick="setSym('🔺')">🔺</button>
       <button class="sym-btn" onclick="setSym('🔻')">🔻</button>
@@ -1405,40 +1411,63 @@ window.lbEditCurrent = function() {
 /* ══ Photo Editor ══ */
 const imageCanvas = document.getElementById('imageCanvas');
 const annotCanvas = document.getElementById('annotCanvas');
-let edSheetId = '', edImgId = '', edTool = 'draw', edColor = '#ff3c00', edSize = 5;
-let edDrawing = false, edAnnotHistory = [], edStartX = 0, edStartY = 0, edSnapshotData = null;
-let edNumCount = 1, edCurrSym = '✅', edTxtActive = false;
-const COLORS = ['#ff3c00', '#ffdd00', '#00cc55', '#1565c0', '#fff', '#000', '#ff69b4', '#00bcd4'];
 
-window.openEditor = function(id, iid, e) { if (e) e.stopPropagation(); openEditorById(id, iid); };
+let edSheetId = '', edImgId = '', edTool = 'draw';
+let edColor = '#ff3c00', edSize = 5;
+let edDrawing = false, edAnnotHistory = [];
+let edStartX = 0, edStartY = 0, edSnapshotData = null;
+let edNumCount = 1, edCurrSym = '✅', edTxtActive = false;
+
+const COLORS = [
+  '#ff3c00','#ffdd00','#00cc55','#1565c0',
+  '#fff','#000','#ff69b4','#00bcd4'
+];
+
+/* ── Open Editor ── */
+window.openEditor = function(id, iid, e) {
+  if (e) e.stopPropagation();
+  openEditorById(id, iid);
+};
 
 async function openEditorById(id, iid) {
   const src = await loadImg(iid);
   if (!src) { toast('ไม่พบรูปภาพ'); return; }
-  edSheetId = id; edImgId = iid; edAnnotHistory = []; edNumCount = 1;
+  edSheetId = id; edImgId = iid;
+  edAnnotHistory = []; edNumCount = 1;
   edTool = 'draw'; edColor = '#ff3c00'; edSize = 5;
+
   const wrap = document.getElementById('edWrap');
-  const img = new Image();
+  const img  = new Image();
+
   img.onload = async () => {
-    const maxW = wrap.clientWidth || window.innerWidth;
+    const maxW = wrap.clientWidth  || window.innerWidth;
     const maxH = wrap.clientHeight || (window.innerHeight - 160);
     let w = img.width, h = img.height;
     const r = w / h;
     if (w > maxW) { w = maxW; h = Math.round(w / r); }
     if (h > maxH) { h = maxH; w = Math.round(h * r); }
-    imageCanvas.width = w; imageCanvas.height = h;
-    imageCanvas.style.width = w + 'px'; imageCanvas.style.height = h + 'px';
+
+    imageCanvas.width  = w; imageCanvas.height  = h;
+    imageCanvas.style.width  = w + 'px';
+    imageCanvas.style.height = h + 'px';
     imageCanvas.getContext('2d').drawImage(img, 0, 0, w, h);
-    annotCanvas.width = w; annotCanvas.height = h;
-    annotCanvas.style.width = w + 'px'; annotCanvas.style.height = h + 'px';
+
+    annotCanvas.width  = w; annotCanvas.height  = h;
+    annotCanvas.style.width  = w + 'px';
+    annotCanvas.style.height = h + 'px';
     annotCanvas.getContext('2d').clearRect(0, 0, w, h);
+
     const ea = await loadAnnot(iid);
     if (ea) {
       const ai = new Image();
-      ai.onload = () => { annotCanvas.getContext('2d').drawImage(ai, 0, 0, w, h); pushAnnotHistory(); };
+      ai.onload  = () => {
+        annotCanvas.getContext('2d').drawImage(ai, 0, 0, w, h);
+        pushAnnotHistory();
+      };
       ai.onerror = () => pushAnnotHistory();
       ai.src = ea;
     } else pushAnnotHistory();
+
     setTool('draw');
     initEdColors();
     document.getElementById('edSize').value = 5;
@@ -1447,6 +1476,7 @@ async function openEditorById(id, iid) {
   img.src = src;
 }
 
+/* ── Colors ── */
 function initEdColors() {
   const wrap = document.getElementById('edColors');
   wrap.innerHTML = '';
@@ -1464,57 +1494,103 @@ function initEdColors() {
   });
 }
 
+/* ── Set Tool ── */
 window.setTool = function(t) {
-  edTool = t; hideTxtOverlay(); closeSymPicker();
+  edTool = t;
+  hideTxtOverlay();
+  closeSymPicker();
   document.querySelectorAll('.ed-tool').forEach(el => el.classList.remove('on'));
-  const map = { draw: 'etDraw', arrow: 'etArrow', rect: 'etRect', circle: 'etCircle', line: 'etLine', text: 'etText', number: 'etNum', symbol: 'etSym' };
+
+  const map = {
+    draw:   'etDraw',
+    arrow:  'etArrow',
+    rect:   'etRect',
+    circle: 'etCircle',
+    line:   'etLine',
+    text:   'etText',
+    number: 'etNum',
+    symbol: 'etSym',
+    check:  'etCheck',   // ✅ เพิ่มใหม่
+    cross:  'etCross'    // ✅ เพิ่มใหม่
+  };
+
   const el = document.getElementById(map[t]);
   if (el) el.classList.add('on');
 };
 
+/* ── Symbol Picker ── */
 window.toggleSymPicker = function() {
   document.getElementById('symPicker').classList.toggle('on');
-  if (document.getElementById('symPicker').classList.contains('on')) setTool('symbol');
+  if (document.getElementById('symPicker').classList.contains('on')) {
+    setTool('symbol');
+  }
 };
-function closeSymPicker() { document.getElementById('symPicker').classList.remove('on'); }
-window.setSym = function(s) { edCurrSym = s; closeSymPicker(); setTool('symbol'); };
 
+function closeSymPicker() {
+  document.getElementById('symPicker').classList.remove('on');
+}
+
+window.setSym = function(s) {
+  edCurrSym = s;
+  closeSymPicker();
+  setTool('symbol');
+};
+
+/* ── Get Canvas Position ── */
 function getPos(e, cvs) {
-  const r = cvs.getBoundingClientRect();
-  const sx = cvs.width / r.width, sy = cvs.height / r.height;
+  const r  = cvs.getBoundingClientRect();
+  const sx = cvs.width  / r.width;
+  const sy = cvs.height / r.height;
   let cx, cy;
-  if (e.touches) { cx = e.touches[0].clientX; cy = e.touches[0].clientY; }
-  else { cx = e.clientX; cy = e.clientY; }
+  if (e.touches) {
+    cx = e.touches[0].clientX;
+    cy = e.touches[0].clientY;
+  } else {
+    cx = e.clientX;
+    cy = e.clientY;
+  }
   return { x: (cx - r.left) * sx, y: (cy - r.top) * sy };
 }
 
+/* ── History ── */
 function pushAnnotHistory() {
   const ctx = annotCanvas.getContext('2d');
-  edAnnotHistory.push(ctx.getImageData(0, 0, annotCanvas.width, annotCanvas.height));
+  edAnnotHistory.push(
+    ctx.getImageData(0, 0, annotCanvas.width, annotCanvas.height)
+  );
   if (edAnnotHistory.length > 30) edAnnotHistory.shift();
 }
 
 window.edUndo = function() {
-  if (edAnnotHistory.length <= 1) { toast('ไม่มีอะไรให้ย้อนกลับ'); return; }
+  if (edAnnotHistory.length <= 1) {
+    toast('ไม่มีอะไรให้ย้อนกลับ'); return;
+  }
   edAnnotHistory.pop();
-  annotCanvas.getContext('2d').putImageData(edAnnotHistory[edAnnotHistory.length - 1], 0, 0);
+  annotCanvas.getContext('2d')
+    .putImageData(edAnnotHistory[edAnnotHistory.length - 1], 0, 0);
 };
 
 window.edClearAnnot = function() {
   if (!confirm('ล้าง annotation?')) return;
-  annotCanvas.getContext('2d').clearRect(0, 0, annotCanvas.width, annotCanvas.height);
+  annotCanvas.getContext('2d')
+    .clearRect(0, 0, annotCanvas.width, annotCanvas.height);
   edAnnotHistory = [edAnnotHistory[0]];
   edNumCount = 1;
   toast('🗑️ ล้างแล้ว');
 };
 
+/* ── Pointer Events ── */
 function edPointerDown(e) {
-  e.preventDefault(); hideTxtOverlay();
+  e.preventDefault();
+  hideTxtOverlay();
   const pos = getPos(e, annotCanvas);
-  edStartX = pos.x; edStartY = pos.y; edDrawing = true;
-  const ctx = annotCanvas.getContext('2d'); applyStyle(ctx);
-  if (edTool === 'draw') { ctx.beginPath(); ctx.moveTo(pos.x, pos.y); }
-  else if (edTool === 'text') { edDrawing = false; showTxtOverlay(pos.x, pos.y); }
+  edStartX = pos.x; edStartY = pos.y;
+  edDrawing = true;
+  const ctx = annotCanvas.getContext('2d');
+  applyStyle(ctx);
+
+  if      (edTool === 'draw')   { ctx.beginPath(); ctx.moveTo(pos.x, pos.y); }
+  else if (edTool === 'text')   { edDrawing = false; showTxtOverlay(pos.x, pos.y); }
   else if (edTool === 'number') { drawNumber(ctx, pos.x, pos.y); pushAnnotHistory(); edDrawing = false; }
   else if (edTool === 'symbol') { drawSymbol(ctx, pos.x, pos.y); pushAnnotHistory(); edDrawing = false; }
   else edSnapshotData = ctx.getImageData(0, 0, annotCanvas.width, annotCanvas.height);
@@ -1524,9 +1600,12 @@ function edPointerMove(e) {
   if (!edDrawing) return;
   e.preventDefault();
   const pos = getPos(e, annotCanvas);
-  const ctx = annotCanvas.getContext('2d'); applyStyle(ctx);
-  if (edTool === 'draw') { ctx.lineTo(pos.x, pos.y); ctx.stroke(); }
-  else if (['rect', 'circle', 'line', 'arrow'].includes(edTool)) {
+  const ctx = annotCanvas.getContext('2d');
+  applyStyle(ctx);
+
+  if (edTool === 'draw') {
+    ctx.lineTo(pos.x, pos.y); ctx.stroke();
+  } else if (['rect','circle','line','arrow'].includes(edTool)) {
     ctx.putImageData(edSnapshotData, 0, 0);
     drawShape(ctx, edTool, edStartX, edStartY, pos.x, pos.y);
   }
@@ -1534,49 +1613,68 @@ function edPointerMove(e) {
 
 function edPointerUp(e) {
   if (!edDrawing) return;
-  e.preventDefault(); edDrawing = false;
+  e.preventDefault();
+  edDrawing = false;
   const pos = getPos(e, annotCanvas);
-  const ctx = annotCanvas.getContext('2d'); applyStyle(ctx);
-  if (['rect', 'circle', 'line', 'arrow'].includes(edTool)) {
+  const ctx = annotCanvas.getContext('2d');
+  applyStyle(ctx);
+
+  if (['rect','circle','line','arrow'].includes(edTool)) {
     ctx.putImageData(edSnapshotData, 0, 0);
     drawShape(ctx, edTool, edStartX, edStartY, pos.x, pos.y);
   }
   pushAnnotHistory();
 }
 
+/* ── Style ── */
 function applyStyle(ctx) {
-  ctx.strokeStyle = edColor; ctx.fillStyle = edColor;
-  ctx.lineWidth = parseInt(document.getElementById('edSize').value) || 5;
-  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = edColor;
+  ctx.fillStyle   = edColor;
+  ctx.lineWidth   = parseInt(document.getElementById('edSize').value) || 5;
+  ctx.lineCap     = 'round';
+  ctx.lineJoin    = 'round';
 }
 
+/* ── Shapes ── */
 function drawShape(ctx, tool, x1, y1, x2, y2) {
   ctx.beginPath();
-  if (tool === 'rect') ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-  else if (tool === 'circle') {
-    const rx = Math.abs(x2 - x1) / 2, ry = Math.abs(y2 - y1) / 2;
-    ctx.ellipse(x1 + (x2 - x1) / 2, y1 + (y2 - y1) / 2, rx, ry, 0, 0, Math.PI * 2);
+  if (tool === 'rect') {
+    ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+  } else if (tool === 'circle') {
+    const rx = Math.abs(x2 - x1) / 2;
+    const ry = Math.abs(y2 - y1) / 2;
+    ctx.ellipse(
+      x1 + (x2 - x1) / 2, y1 + (y2 - y1) / 2,
+      rx, ry, 0, 0, Math.PI * 2
+    );
     ctx.stroke();
+  } else if (tool === 'line') {
+    ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  } else if (tool === 'arrow') {
+    drawArrow(ctx, x1, y1, x2, y2);
   }
-  else if (tool === 'line') { ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
-  else if (tool === 'arrow') drawArrow(ctx, x1, y1, x2, y2);
 }
 
 function drawArrow(ctx, x1, y1, x2, y2) {
   const ang = Math.atan2(y2 - y1, x2 - x1), hl = 18;
-  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
   ctx.beginPath();
   ctx.moveTo(x2, y2);
-  ctx.lineTo(x2 - hl * Math.cos(ang - Math.PI / 7), y2 - hl * Math.sin(ang - Math.PI / 7));
-  ctx.lineTo(x2 - hl * Math.cos(ang + Math.PI / 7), y2 - hl * Math.sin(ang + Math.PI / 7));
-  ctx.closePath(); ctx.fill();
+  ctx.lineTo(x2 - hl * Math.cos(ang - Math.PI / 7),
+             y2 - hl * Math.sin(ang - Math.PI / 7));
+  ctx.lineTo(x2 - hl * Math.cos(ang + Math.PI / 7),
+             y2 - hl * Math.sin(ang + Math.PI / 7));
+  ctx.closePath();
+  ctx.fill();
 }
 
+/* ── Number ── */
 function drawNumber(ctx, x, y) {
   const sz = parseInt(document.getElementById('edSize').value) * 4 + 16;
-  // ✅ แก้ไข #5: เพิ่ม = ให้ ctx.font
   ctx.font = `bold ${sz}px Arial`;
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillText(String(edNumCount), x + 2, y + 2);
   ctx.fillStyle = edColor;
@@ -1584,67 +1682,136 @@ function drawNumber(ctx, x, y) {
   edNumCount++;
 }
 
+/* ── Symbol ── */
 function drawSymbol(ctx, x, y) {
   const sz = parseInt(document.getElementById('edSize').value) * 4 + 20;
-  // ✅ แก้ไข #6: เพิ่ม = ให้ ctx.font
-  ctx.font = `${sz}px serif`;
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(edCurrSym, x, y);
+
+  // ✅ เครื่องหมายผิด → วาดด้วย canvas line (คมชัด + ใช้ edColor)
+  if (edCurrSym === '✕') {
+    const half = sz / 2;
+    ctx.save();
+    ctx.strokeStyle = edColor;
+    ctx.lineWidth   = Math.max(3, sz / 8);
+    ctx.lineCap     = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x - half, y - half);
+    ctx.lineTo(x + half, y + half);
+    ctx.moveTo(x + half, y - half);
+    ctx.lineTo(x - half, y + half);
+    ctx.stroke();
+    ctx.restore();
+  } else {
+    // emoji อื่น ๆ รวมถึง ✅
+    ctx.font = `${sz}px serif`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(edCurrSym, x, y);
+  }
 }
 
+/* ── Text Overlay ── */
 function showTxtOverlay(cx, cy) {
-  const ov = document.getElementById('txtOverlay'), inp = document.getElementById('edTxtInput');
-  const r = annotCanvas.getBoundingClientRect(), wr = annotCanvas.parentElement.getBoundingClientRect();
-  const sx = r.width / annotCanvas.width, sy = r.height / annotCanvas.height;
-  ov.style.left = (cx * sx - 10 + (r.left - wr.left)) + 'px';
-  ov.style.top = (cy * sy - 14 + (r.top - wr.top)) + 'px';
+  const ov  = document.getElementById('txtOverlay');
+  const inp = document.getElementById('edTxtInput');
+  const r   = annotCanvas.getBoundingClientRect();
+  const wr  = annotCanvas.parentElement.getBoundingClientRect();
+  const sx  = r.width  / annotCanvas.width;
+  const sy  = r.height / annotCanvas.height;
+
+  ov.style.left    = (cx * sx + (r.left - wr.left)) + 'px';
+  ov.style.top     = (cy * sy + (r.top  - wr.top))  + 'px';
   ov.style.display = 'block';
-  inp.style.fontSize = (parseInt(document.getElementById('edSize').value) * 3 + 14) + 'px';
-  inp.style.color = edColor; inp.value = ''; inp.style.height = 'auto';
-  edTxtActive = true; setTimeout(() => inp.focus(), 50);
+
+  const fz = parseInt(document.getElementById('edSize').value) * 3 + 14;
+  inp.style.fontSize = fz + 'px';
+  inp.style.color    = edColor;
+  inp.value          = '';
+  inp.style.height   = 'auto';
+
+  edTxtActive = true;
+  setTimeout(() => inp.focus(), 50);
 }
 
-function hideTxtOverlay() { commitText(); document.getElementById('txtOverlay').style.display = 'none'; edTxtActive = false; }
+function hideTxtOverlay() {
+  commitText();
+  document.getElementById('txtOverlay').style.display = 'none';
+  edTxtActive = false;
+}
 
+/* ✅ แก้ไข commitText: คำนวณตำแหน่งถูกต้อง */
 function commitText() {
   if (!edTxtActive) return;
   const inp = document.getElementById('edTxtInput');
-  const txt = inp.value.trim(); if (!txt) return;
+  const txt = inp.value.trim();
+  if (!txt) return;
+
   const ctx = annotCanvas.getContext('2d');
-  const r = annotCanvas.getBoundingClientRect();
-  const ov = document.getElementById('txtOverlay');
-  const oL = parseFloat(ov.style.left) + 10, oT = parseFloat(ov.style.top) + 14;
-  const sx = annotCanvas.width / r.width, sy = annotCanvas.height / r.height;
+  const r   = annotCanvas.getBoundingClientRect();
+  const ov  = document.getElementById('txtOverlay');
+  const wr  = annotCanvas.parentElement.getBoundingClientRect();
+
+  const sx = annotCanvas.width  / r.width;
+  const sy = annotCanvas.height / r.height;
+
+  // ✅ หัก canvasOffset ก่อนคูณ scale
+  const canvasOffsetX = r.left - wr.left;
+  const canvasOffsetY = r.top  - wr.top;
+
+  const oL = parseFloat(ov.style.left);
+  const oT = parseFloat(ov.style.top);
+
   const sz = parseInt(document.getElementById('edSize').value) * 3 + 14;
-  ctx.font = `bold ${sz}px Arial`;
-  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.font         = `bold ${sz}px Arial`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign    = 'left';
+
   inp.value.split('\n').forEach((line, i) => {
-    const px = oL * sx, py = (oT + i * (sz + 4)) * sy;
-    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillText(line, px + 2, py + 2);
-    ctx.fillStyle = edColor; ctx.fillText(line, px, py);
+    const px = (oL - canvasOffsetX) * sx;
+    const py = (oT - canvasOffsetY + i * (sz + 4)) * sy;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillText(line, px + 2, py + 2);
+    ctx.fillStyle = edColor;
+    ctx.fillText(line, px, py);
   });
   pushAnnotHistory();
 }
 
-window.autoResizeTxt = function(el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; };
-window.txtKeyDown = function(e) { if (e.key === 'Escape') hideTxtOverlay(); };
+window.autoResizeTxt = function(el) {
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+};
 
-annotCanvas.addEventListener('mousedown', edPointerDown);
-annotCanvas.addEventListener('mousemove', edPointerMove);
-annotCanvas.addEventListener('mouseup', edPointerUp);
+window.txtKeyDown = function(e) {
+  if (e.key === 'Escape') hideTxtOverlay();
+};
+
+/* ── Canvas Events ── */
+annotCanvas.addEventListener('mousedown',  edPointerDown);
+annotCanvas.addEventListener('mousemove',  edPointerMove);
+annotCanvas.addEventListener('mouseup',    edPointerUp);
 annotCanvas.addEventListener('touchstart', edPointerDown, { passive: false });
-annotCanvas.addEventListener('touchmove', edPointerMove, { passive: false });
-annotCanvas.addEventListener('touchend', edPointerUp, { passive: false });
+annotCanvas.addEventListener('touchmove',  edPointerMove, { passive: false });
+annotCanvas.addEventListener('touchend',   edPointerUp,   { passive: false });
 
-window.edCancel = function() { document.getElementById('editor').classList.remove('on'); hideTxtOverlay(); };
+/* ── Save / Cancel ── */
+window.edCancel = function() {
+  document.getElementById('editor').classList.remove('on');
+  hideTxtOverlay();
+};
+
 window.edSaveDone = async function() {
   hideTxtOverlay();
   await new Promise(r => setTimeout(r, 80));
   const actx = annotCanvas.getContext('2d');
-  const data = actx.getImageData(0, 0, annotCanvas.width, annotCanvas.height).data;
+  const data = actx.getImageData(
+    0, 0, annotCanvas.width, annotCanvas.height
+  ).data;
   const has = data.some(v => v !== 0);
-  if (has) { await saveAnnot(edImgId, annotCanvas.toDataURL('image/png')); }
-  else await delAnnot(edImgId);
+  if (has) {
+    await saveAnnot(edImgId, annotCanvas.toDataURL('image/png'));
+  } else {
+    await delAnnot(edImgId);
+  }
   document.getElementById('editor').classList.remove('on');
   await rebuildGrid(edSheetId);
   showSaving(edSheetId);
