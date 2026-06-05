@@ -49,7 +49,7 @@ html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#e6eaee;font
 .fl{font-size:12px;color:#555;font-weight:700;margin-bottom:3px;display:block}
 .fi,.ft{width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;font-family:inherit;background:#fff;outline:none}
 .fi:focus,.ft:focus{border-color:var(--g)}
-.ft{resize:vertical;min-height:65px}
+.ft{resize:none;min-height:65px;overflow:hidden}
 .fr{display:flex;gap:8px}.fr .fs{flex:1}
 .rg{display:flex;gap:8px;margin-top:3px}
 .rb{flex:1;padding:10px;border-radius:8px;border:2px solid #ddd;background:#fff;font-size:13px;font-weight:700;cursor:pointer;transition:all .15s}
@@ -341,6 +341,38 @@ window.__loaderFailSafe = true;
 </div>
 <div class="toast" id="toast"></div>
 <script>
+
+function autoResize(el){
+  if(!el) return;
+  el.style.height = 'auto';
+  const minH = 65;
+  el.style.height = Math.max(el.scrollHeight, minH) + 'px';
+}
+
+function initAutoResizeTextareas(root=document){
+  if(!root || !root.querySelectorAll) return;
+  root.querySelectorAll('textarea.ft').forEach(autoResize);
+}
+
+document.addEventListener('input', function(e){
+  const t = e.target;
+  if(t && t.matches && t.matches('textarea.ft')) autoResize(t);
+}, true);
+
+document.addEventListener('DOMContentLoaded', function(){
+  initAutoResizeTextareas(document);
+  const mo = new MutationObserver(function(muts){
+    muts.forEach(function(m){
+      m.addedNodes && m.addedNodes.forEach(function(node){
+        if(!node || node.nodeType !== 1) return;
+        if(node.matches && node.matches('textarea.ft')) autoResize(node);
+        if(node.querySelectorAll) node.querySelectorAll('textarea.ft').forEach(autoResize);
+      });
+    });
+  });
+  mo.observe(document.body, { childList:true, subtree:true });
+});
+
 const FILE_ID="SCGP_BS_%%FILEID%%";
 const _FID=FILE_ID.includes('%%')?(()=>{const k='_scgp_fid';let id=sessionStorage.getItem(k);if(!id){id='FID_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);sessionStorage.setItem(k,id);}return id;})():FILE_ID;
 const FB_DISABLED = true;
@@ -569,77 +601,163 @@ async function loadPhotoDataURLs(sheetId) {
     const meta = await getMeta(sheetId);
     const ids  = meta?.imgIds || [];
     if (!ids.length) return [];
-    /* ★ กรอง ID ที่เป็นโลโก้ออก ★ */
-    const photoIds = ids.filter(id =>
-      !id.toLowerCase().includes('logo') &&
-      !id.toLowerCase().includes('header') &&
-      !id.toLowerCase().includes('brand')
-    );
-    console.log(
-      `[loadPhotoDataURLs] sheetId=${sheetId}`,
-      `total=${ids.length}`,
-      `afterFilter=${photoIds.length}`,
-      `filteredOut=${ids.length - photoIds.length}`
-    );
-    return (await Promise.all(photoIds.map(async imgId => {
+
+    const photoIds = ids.filter(id => {
+      const low = String(id || '').toLowerCase();
+      return !low.includes('logo') && !low.includes('header') && !low.includes('brand');
+    });
+
+    const list = await Promise.all(photoIds.map(async imgId => {
       try {
-        const blob = await dbGetBlob(imgId);
-        if (!blob) return null;
-        return await new Promise(res => {
-          const url = URL.createObjectURL(blob);
+        const src = await buildCompositeAsync(imgId);
+        if (!src) return null;
+        return await new Promise(resolve => {
           const img = new Image();
-          const t   = setTimeout(() => {
-            URL.revokeObjectURL(url); res(null);
-          }, 8000);
           img.onload = () => {
-            clearTimeout(t);
-            URL.revokeObjectURL(url);
             try {
-              /* ★ กรองรูปที่มีสัดส่วนผิดปกติ (โลโก้มักกว้างมาก) ★ */
-              const ratio = img.naturalWidth / img.naturalHeight;
-              if (ratio > 5 || ratio < 0.2) { res(null); return; }
-              const MAX = 1200;
-              const sc  = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+              const MAX = 1600;
+              const sc  = Math.min(1, MAX / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
               const c   = document.createElement('canvas');
-              c.width   = Math.round(img.naturalWidth  * sc);
-              c.height  = Math.round(img.naturalHeight * sc);
-              c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-              res(c.toDataURL('image/jpeg', 0.80));
-            } catch { res(null); }
+              c.width   = Math.max(1, Math.round((img.naturalWidth  || img.width  || 1) * sc));
+              c.height  = Math.max(1, Math.round((img.naturalHeight || img.height || 1) * sc));
+              const ctx = c.getContext('2d', { alpha:false });
+              ctx.fillStyle = '#fff';
+              ctx.fillRect(0, 0, c.width, c.height);
+              ctx.drawImage(img, 0, 0, c.width, c.height);
+              resolve(c.toDataURL('image/jpeg', 0.88));
+            } catch {
+              resolve(src);
+            }
           };
-          img.onerror = () => {
-            clearTimeout(t);
-            URL.revokeObjectURL(url);
-            res(null);
-          };
-          img.src = url;
+          img.onerror = () => resolve(src);
+          img.src = src;
         });
-      } catch { return null; }
-    }))).filter(Boolean);
-  } catch { return []; }
+      } catch {
+        return null;
+      }
+    }));
+
+    return list.filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 /* ══ render element → canvas ══ */
 async function elToCanvas(el, w = 794) {
-  return html2canvas(el, {
-    scale          : 1.5,
-    useCORS        : true,
-    allowTaint     : true,
-    backgroundColor: '#fff',
-    logging        : false,
-    imageTimeout   : 0,
-    width          : w,
-    windowWidth    : w,
-    scrollX        : 0,
-    scrollY        : -window.scrollY,
-    onclone        : (_, clone) => {
-      clone.querySelectorAll(
-        'button,.btn,.arow,.fab,.fab-menu,.toast,.progress-bar,' +
-        '.asdot,.autosave-bar,[data-noprint],' +
-        '.photo-section,.img-section,.photos,.photo-grid,[data-photos]'
-      ).forEach(e => { e.style.display = 'none'; });
-    }
-  });
+  const targetId = el && el.id ? el.id : '';
+  const scale = Math.max(2.2, Math.min(3.2, (window.devicePixelRatio || 1) * 2));
+
+  const prevStyle = el.getAttribute('style') || '';
+  const prevBodyOv = document.body.style.overflow;
+  const prevDocOv  = document.documentElement.style.overflow;
+  el.style.width = w + 'px';
+  el.style.minWidth = w + 'px';
+  el.style.maxWidth = w + 'px';
+  el.style.height = 'auto';
+  el.style.maxHeight = 'none';
+  el.style.overflow = 'visible';
+  document.body.style.overflow = 'visible';
+  document.documentElement.style.overflow = 'visible';
+
+  try {
+    return await html2canvas(el, {
+      scale,
+      useCORS        : true,
+      allowTaint     : true,
+      backgroundColor: '#fff',
+      logging        : false,
+      imageTimeout   : 0,
+      width          : w,
+      windowWidth    : w,
+      windowHeight   : Math.max(el.scrollHeight, el.offsetHeight, 1000),
+      scrollX        : 0,
+      scrollY        : 0,
+      onclone        : (doc) => {
+        const root = targetId ? (doc.getElementById(targetId) || doc.body) : doc.body;
+        const hideSel = [
+          'button','.btn','.arow','.fab','.fab-menu','.toast','.progress-bar',
+          '.asdot','.autosave-bar','[data-noprint]','.photo-section','.img-section',
+          '.photos','.photo-grid','[data-photos]','.pgrid','.pcell','.pcnt',
+          '.padd-row','.pdel','.pedit','.bar','.data-bar','.sync-pill',
+          '.lb','.editor','.pdf-progress','.loading-cover'
+        ].join(',');
+        root.querySelectorAll(hideSel).forEach(e => { e.style.display = 'none'; });
+
+        root.querySelectorAll('[id^="grid-"]').forEach(elm => {
+          const fs = elm.closest('.fs');
+          if (fs) fs.style.display = 'none';
+        });
+        root.querySelectorAll('[id^="pcnt-"]').forEach(elm => {
+          const fs = elm.closest('.fs');
+          if (fs) fs.style.display = 'none';
+        });
+        root.querySelectorAll('label.fl').forEach(lbl => {
+          if ((lbl.textContent || '').includes('รูปภาพ')) {
+            const fs = lbl.closest('.fs');
+            if (fs) fs.style.display = 'none';
+          }
+        });
+
+        // Replace textarea with print-safe DIV so long text does not clip in PDF
+        root.querySelectorAll('textarea.ft').forEach(t => {
+          const mirror = doc.createElement('div');
+          mirror.className = 'pdf-ft-mirror';
+          const st = doc.defaultView.getComputedStyle(t);
+          mirror.textContent = t.value || t.textContent || '';
+          mirror.style.width = '100%';
+          mirror.style.minHeight = Math.max(t.scrollHeight || 65, 65) + 'px';
+          mirror.style.padding = st.padding;
+          mirror.style.border = st.border;
+          mirror.style.borderRadius = st.borderRadius;
+          mirror.style.background = st.backgroundColor || '#fff';
+          mirror.style.color = st.color;
+          mirror.style.font = st.font;
+          mirror.style.fontSize = st.fontSize;
+          mirror.style.fontFamily = st.fontFamily;
+          mirror.style.fontWeight = st.fontWeight;
+          mirror.style.lineHeight = st.lineHeight === 'normal' ? '1.45' : st.lineHeight;
+          mirror.style.letterSpacing = st.letterSpacing;
+          mirror.style.textAlign = st.textAlign;
+          mirror.style.whiteSpace = 'pre-wrap';
+          mirror.style.wordBreak = 'break-word';
+          mirror.style.overflowWrap = 'anywhere';
+          mirror.style.boxSizing = 'border-box';
+          mirror.style.display = 'block';
+          t.parentNode.replaceChild(mirror, t);
+        });
+
+        root.querySelectorAll('*').forEach(node => {
+          const st = doc.defaultView.getComputedStyle(node);
+          if (st.position === 'sticky' || st.position === 'fixed') node.style.position = 'static';
+          if (st.overflowY === 'auto' || st.overflowY === 'scroll') node.style.overflowY = 'visible';
+          if (st.overflowX === 'auto' || st.overflowX === 'scroll') node.style.overflowX = 'visible';
+          if (st.maxHeight && st.maxHeight !== 'none') node.style.maxHeight = 'none';
+        });
+
+        if (root && root.style) {
+          root.style.width = w + 'px';
+          root.style.minWidth = w + 'px';
+          root.style.maxWidth = w + 'px';
+          root.style.height = 'auto';
+          root.style.maxHeight = 'none';
+          root.style.overflow = 'visible';
+          root.style.background = '#fff';
+          root.style.margin = '0';
+          root.style.transform = 'none';
+        }
+        doc.documentElement.style.background = '#fff';
+        doc.documentElement.style.overflow = 'visible';
+        doc.body.style.background = '#fff';
+        doc.body.style.margin = '0';
+        doc.body.style.overflow = 'visible';
+      }
+    });
+  } finally {
+    el.setAttribute('style', prevStyle);
+    document.body.style.overflow = prevBodyOv;
+    document.documentElement.style.overflow = prevDocOv;
+  }
 }
 
 /* ══════════════════════════════════════════════
@@ -655,7 +773,7 @@ function splitBatches(arr, size) {
 
 /* ══════════════════════════════════════════════
    calcGrid — คำนวณ layout ของ 1 batch
-   n ต้องเป็น ≤ MAX_P (12) เสมอ
+   n ต้องเป็น ≤ MAX_P (6) เสมอ
    รักษาสัดส่วน 4:3
    ══════════════════════════════════════════════ */
 function calcGrid(n, areaW, areaH) {
@@ -686,9 +804,50 @@ function calcGrid(n, areaW, areaH) {
 }
 
 /* ══════════════════════════════════════════════
-   drawOneBatch — วาด 1 batch (≤ 12) ลงในพื้นที่
+   drawOneBatch — วาด 1 batch (≤ 6) ลงในพื้นที่
    center แนวตั้งใน areaH
    ══════════════════════════════════════════════ */
+
+function addPagedCanvasContent(pdf, canvas, addNewPageFirst = false, firstPageReservedMm = 0) {
+  const pageW = _PDF.CW;
+  const pageH = _PDF.CH;
+  const margin = _PDF.M;
+  const srcW = Math.max(1, canvas.width);
+  const srcH = Math.max(1, canvas.height);
+  const pxPerMm = srcW / pageW;
+  const firstAvailMm = Math.max(20, pageH - Math.max(0, firstPageReservedMm));
+  const firstSlicePx = Math.max(1, Math.floor(firstAvailMm * pxPerMm));
+  const normalSlicePx = Math.max(1, Math.floor(pageH * pxPerMm));
+
+  let yPx = 0;
+  let first = true;
+  let firstSliceMm = 0;
+  let pages = 0;
+
+  while (yPx < srcH) {
+    const maxSlicePx = first ? firstSlicePx : normalSlicePx;
+    const sliceH = Math.min(maxSlicePx, srcH - yPx);
+    const part = document.createElement('canvas');
+    part.width = srcW;
+    part.height = sliceH;
+    const ctx = part.getContext('2d', { alpha:false });
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, part.width, part.height);
+    ctx.drawImage(canvas, 0, yPx, srcW, sliceH, 0, 0, srcW, sliceH);
+    const mmH = sliceH / pxPerMm;
+
+    if ((addNewPageFirst && first) || (!first)) pdf.addPage();
+    pdf.addImage(part.toDataURL('image/png'), 'PNG', margin, margin, pageW, mmH, undefined, 'FAST');
+
+    if (first) firstSliceMm = mmH;
+    first = false;
+    pages += 1;
+    yPx += sliceH;
+  }
+
+  return { pageCount: pages, firstSliceMm };
+}
+
 function drawOneBatch(pdf, batch, startY, areaH) {
   if (!batch.length) return;
   const M  = _PDF.M;
@@ -716,7 +875,7 @@ function drawOneBatch(pdf, batch, startY, areaH) {
    รับรูปทั้งหมด → นับ → ถ้าเกิน maxPerPage
    → สร้างหน้าเปล่า → วางรูปที่เหลือ → วนจนหมด
    ══════════════════════════════════════════════ */
-function placePhotos(pdf, dataURLs, startY, areaH, maxPerPage = 12) {
+function placePhotos(pdf, dataURLs, startY, areaH, maxPerPage = 6) {
   if (!dataURLs.length) return;
   /* ★ แบ่ง batch ตาม maxPerPage → วนจนรูปหมด ★ */
   const batches = splitBatches(dataURLs, maxPerPage);
@@ -738,75 +897,65 @@ function placePhotos(pdf, dataURLs, startY, areaH, maxPerPage = 12) {
 }
 
 /* ══ Core: sheetToPDF ══ */
-async function sheetToPDF(pdf, el, sheetId) {
+async function sheetToPDF(pdf, el, sheetId, addNewPageFirst = false) {
   const SHEET_W = 794;
-  const MAX_C   = 6;   /* รูปสูงสุดร่วมกับ content */
-  const MAX_P   = 12;  /* รูปสูงสุดต่อหน้ารูปล้วน  */
-  const M       = _PDF.M;
-  const PW      = _PDF.CW;
+  const MAX_P   = 6;   /* รูปสูงสุดต่อหน้า ตามเงื่อนไขเดิม */
+  const INLINE_MAX = 3;/* รูปใต้หมายเหตุ/รายละเอียด */
   const prev    = el.getAttribute('style') || '';
-  el.style.cssText +=
-    `;width:${SHEET_W}px;min-width:${SHEET_W}px;overflow:visible;`;
+  el.style.cssText += `;width:${SHEET_W}px;min-width:${SHEET_W}px;max-width:${SHEET_W}px;overflow:visible;background:#fff;`;
   try {
-    const [cContent, allDataURLs] = await Promise.all([
+    const [contentCanvas, allDataURLs] = await Promise.all([
       elToCanvas(el, SHEET_W),
       loadPhotoDataURLs(sheetId)
     ]);
-    console.log(`[sheetToPDF] sheetId=${sheetId} รูปจริง (ไม่รวมโลโก้) = ${allDataURLs.length} รูป`);
-    /* ★ แก้ backtick หาย ★ */
 
-    /* ── content เต็มกว้าง ชิดซ้าย-บน ── */
-    const contentW = PW;
-    const contentH = Math.min(
-      (cContent.height / cContent.width) * contentW, _PDF.CH
-    );
-    pdf.addImage(
-      cContent.toDataURL('image/jpeg', 0.92), 'JPEG',
-      M, M, contentW, contentH
-    );
-
-    if (!allDataURLs.length) return;
-
-    /* ── แบ่งรูปชุดแรก ≤ MAX_C และที่เหลือ ── */
-    const batch1 = allDataURLs.slice(0, MAX_C);
-    const rest   = allDataURLs.slice(MAX_C);
-    const afterY = M + contentH;
-    const spaceH = _PDF.H - M - afterY;
-
-    /* ── ลอง fit batch1 ในหน้าเดียวกับ content ── */
-    const g1     = calcGrid(batch1.length, PW, spaceH - 4);
-    const rows1  = Math.ceil(batch1.length / g1.cols);
-    const gridH1 = rows1 * g1.ch + (rows1 - 1) * g1.gap;  /* ★ แก้ * ★ */
-
-    if (gridH1 <= spaceH - 4) {
-      /* ✅ พอดี → วางใต้ content
-         ★ placePhotos วนสร้างหน้าเปล่าเองถ้าเกิน ★ */
-      placePhotos(pdf, batch1, afterY + 4, spaceH - 4, MAX_C);
-    } else {
-      /* ❌ ไม่พอ → สร้างหน้าเปล่า → วาง
-         ★ placePhotos วนสร้างหน้าเปล่าเองถ้าเกิน ★ */
-      pdf.addPage();
-      placePhotos(pdf, batch1, M, _PDF.CH, MAX_P);
+    // นับจำนวนบรรทัดจริงของ textarea หมายเหตุ/รายละเอียด จากความสูงที่ render แล้ว
+    let noteLines = 999;
+    const noteEl = el.querySelector('textarea.ft');
+    if (noteEl) {
+      const cs = getComputedStyle(noteEl);
+      const fs = parseFloat(cs.fontSize) || 14;
+      const lh = parseFloat(cs.lineHeight);
+      const lineH = Number.isFinite(lh) ? lh : Math.round(fs * 1.45);
+      noteLines = Math.max(1, Math.round((noteEl.scrollHeight || noteEl.clientHeight || 0) / Math.max(1, lineH)));
     }
 
-    /* ── rest: นับรูปที่เหลือ → สร้างหน้าเปล่าวนจนรูปหมด ── */
-    if (rest.length) {
-      /* ★ ใช้ while loop นับรูปที่เหลือ
-         ถ้าเกิน MAX_P → ตัด MAX_P → สร้างหน้าเปล่า → วาด
-         วนซ้ำจนรูปหมด ★ */
-      let remaining = [...rest];
-      while (remaining.length > 0) {
-        const chunk = remaining.splice(0, MAX_P);
-        pdf.addPage();                        /* ★ สร้างหน้าเปล่า ★ */
-        drawOneBatch(pdf, chunk, M, _PDF.CH); /* ★ วางรูปที่เหลือ ★ */
-        console.log(
-          `[rest] วาด ${chunk.length} รูป`,
-          `เหลืออีก ${remaining.length} รูป`,
-          remaining.length > 0 ? '→ จะสร้างหน้าเปล่าเพิ่ม' : '→ รูปหมดแล้ว ✅'
-        );
+    // ถ้าข้อความไม่เกิน 10 บรรทัด อนุญาตให้มีรูปใต้ textbox ได้สูงสุด 3 รูป
+    let inlineCount = 0;
+    let firstPageReservedMm = 0;
+    const naturalContentMm = contentCanvas.height / (contentCanvas.width / _PDF.CW);
+    if (allDataURLs.length && noteLines <= 10) {
+      inlineCount = Math.min(INLINE_MAX, allDataURLs.length);
+      const g = calcGrid(inlineCount, _PDF.CW, 70);
+      const rows = Math.ceil(inlineCount / g.cols);
+      const gridHmm = rows * g.ch + (rows - 1) * g.gap;
+      firstPageReservedMm = gridHmm + 4;
+
+      // อนุญาตเฉพาะกรณี content ทั้งหมดพออยู่หน้าเดียวเมื่อกันที่ว่างให้รูปใต้ note
+      if (naturalContentMm > (_PDF.CH - firstPageReservedMm - 2)) {
+        inlineCount = 0;
+        firstPageReservedMm = 0;
       }
     }
 
+    const inlinePhotos = allDataURLs.slice(0, inlineCount);
+    const remainingPhotos = allDataURLs.slice(inlineCount);
+
+    const pageInfo = addPagedCanvasContent(pdf, contentCanvas, addNewPageFirst, firstPageReservedMm);
+
+    if (inlinePhotos.length) {
+      const startY = _PDF.M + pageInfo.firstSliceMm + 3;
+      const areaH = Math.max(10, _PDF.CH - pageInfo.firstSliceMm - 3);
+      drawOneBatch(pdf, inlinePhotos, startY, areaH);
+    }
+
+    if (remainingPhotos.length) {
+      const batches = splitBatches(remainingPhotos, MAX_P);
+      batches.forEach(batch => {
+        pdf.addPage();
+        drawOneBatch(pdf, batch, _PDF.M, _PDF.CH);
+      });
+    }
   } finally {
     el.setAttribute('style', prev);
   }
@@ -839,9 +988,9 @@ async function buildAllSheetsPDF() {
     await new Promise(r => requestAnimationFrame(r));
     try {
       const el = document.getElementById('pdfarea-' + id) || pg;
-      if (!first) pdf.addPage();
+      const needNewPage = !first;
       first = false;
-      await sheetToPDF(pdf, el, id);
+      await sheetToPDF(pdf, el, id, needNewPage);
     } catch (e) {
       console.warn('err:', id, e);
     } finally {
@@ -924,7 +1073,7 @@ async function doSharePDF(id) {
       await new Promise(r => requestAnimationFrame(r));
       const el  = document.getElementById('pdfarea-' + id) || pg;
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      await sheetToPDF(pdf, el, id);
+      await sheetToPDF(pdf, el, id, false);
       return pdf;
     } finally {
       if (!wasOn) {
@@ -1123,7 +1272,6 @@ async function buildSheetPageAsync(id) {
       <span id="asl-${id}" style="flex:1">พร้อมบันทึกอัตโนมัติ</span>
       <span style="font-size:10px;color:#ccc">AUTO SAVE</span>
     </div>
-    <div style="font-size:17px;font-weight:700;color:var(--g);margin-bottom:10px">📋 ${num}</div>
     <div class="fr">
       <div class="fs" style="flex:1.2">
         <label class="fl">📅 วันที่และเวลาตรวจ</label>
@@ -1151,11 +1299,15 @@ async function buildSheetPageAsync(id) {
         <button class="rb f ${fA}" onclick="setRes('${id}','fail',this)">❌ ไม่ผ่าน (Fail)</button>
       </div>
     </div>
-    <div class="fs">
-      <label class="fl">📝 หมายเหตุ / รายละเอียด</label>
-      <textarea class="ft" placeholder="ระบุรายละเอียด..." oninput="sf('${id}','note',this.value)">${m.note || ''}</textarea>
-    </div>
-    <div class="fs">
+   <div class="fs">
+  <label class="fl">📝 หมายเหตุ / รายละเอียด</label>
+  <textarea
+    class="ft"
+    placeholder="ระบุรายละเอียด..."
+    oninput="autoResize(this); sf('${id}','note',this.value)"
+  >${m.note || ''}</textarea>
+</div>
+<div class="fs">
       <label class="fl">🖼️ รูปภาพประกอบ</label>
       <div class="pgrid" id="grid-${id}"></div>
       <div class="pcnt" id="pcnt-${id}">${imgIds.length} รูป</div>
