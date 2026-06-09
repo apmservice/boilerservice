@@ -144,7 +144,34 @@ html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#e6eaee;font
 .twrap::-webkit-scrollbar{display:none}
 .tabs{display:flex;gap:3px;padding:0 3px;height:58px;align-items:flex-end}
 .tab{min-width:82px;height:42px;display:flex;align-items:center;justify-content:center;background:#e0e0e0;border-radius:7px 7px 0 0;font-weight:700;font-size:12px;cursor:pointer;padding:0 8px;position:relative;transition:background .15s;white-space:nowrap}
+
 .tab.on{border-top:3px solid var(--g);background:#fff}
+.tab.dragging{opacity:.45}
+.tab.drop-left{box-shadow:inset 3px 0 0 var(--g)}
+.tab.drop-right{box-shadow:inset -3px 0 0 var(--g)}
+.tab-label{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;padding-right:16px}
+.tab-menu-btn{position:absolute;right:2px;top:2px;width:18px;height:18px;border:none;border-radius:50%;background:rgba(0,0,0,.08);color:#555;font-size:11px;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;line-height:1}
+.tab-menu-btn:active{opacity:.72}
+.sheet-modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:12000;display:none;align-items:flex-end;justify-content:center}
+.sheet-modal.on{display:flex}
+.sheet-modal-card{width:min(100%,560px);background:#fff;border-radius:18px 18px 0 0;padding:14px 14px calc(14px + env(safe-area-inset-bottom,0px));box-shadow:0 -10px 30px rgba(0,0,0,.2);max-height:82vh;overflow:auto}
+.sheet-modal-title{font-size:16px;font-weight:700;color:#111;margin:0 0 10px}
+.sheet-modal-sub{font-size:12px;color:#777;margin:-4px 0 10px}
+.sheet-list{display:flex;flex-direction:column;gap:8px}
+.sheet-row-btn,.sheet-act-btn{width:100%;border:none;border-radius:12px;background:#f6f7f9;padding:12px 14px;font-size:14px;font-weight:700;color:#222;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer}
+.sheet-row-btn:active,.sheet-act-btn:active{opacity:.75}
+.sheet-row-meta{font-size:11px;color:#888;font-weight:600}
+.sheet-act-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sheet-act-btn.primary{background:#e8f7ee;color:#177245}
+.sheet-act-btn.warn{background:#fff4db;color:#9a6700}
+.sheet-act-btn.danger{background:#fdecec;color:#b42318}
+.sheet-act-btn.neutral{background:#eef2f6;color:#344054}
+.sheet-modal-close{width:100%;margin-top:10px;border:none;border-radius:12px;background:#222;color:#fff;padding:12px;font-size:14px;font-weight:700;cursor:pointer}
+@media (max-width: 520px){
+  .tab{min-width:94px}
+  .tab-menu-btn{width:20px;height:20px;font-size:12px}
+}
+
 .tdot{width:7px;height:7px;border-radius:50%;position:absolute;top:5px;right:4px}
 .tdot.p{background:var(--g)}.tdot.f{background:var(--r)}
 .ibtn{width:42px;height:42px;margin:8px 3px auto;border-radius:50%;border:1px solid #aaa;background:#fff;font-size:19px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -339,7 +366,17 @@ window.__loaderFailSafe = true;
     <button class="ed-abtn ed-save"   onclick="edSaveDone()">✅ บันทึกรูป</button>
   </div>
 </div>
+
+<div class="sheet-modal" id="sheetModal" onclick="if(event.target===this) closeSheetModal()">
+  <div class="sheet-modal-card">
+    <div class="sheet-modal-title" id="sheetModalTitle">จัดการ Sheet</div>
+    <div class="sheet-modal-sub" id="sheetModalSub"></div>
+    <div id="sheetModalBody"></div>
+    <button class="sheet-modal-close" onclick="closeSheetModal()">ปิด</button>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
+
 <script>
 
 function autoResize(el){
@@ -510,8 +547,14 @@ function nowDTL(){const d=new Date(),p=n=>String(n).padStart(2,'0');return `${d.
 function fmtDT(v){if(!v)return'';try{return new Date(v).toLocaleString('th-TH',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return v}}
 
 /* ══ State ══ */
+
 let sheetIds=['summary'],active='summary',asTimer=null;
 let _activeUploadId=''; // track sheet ที่กำลัง upload
+let _dragSheetId = null;
+let _tabPressTimer = null;
+let _tabPressTriggered = false;
+let _sheetModalCurrentId = null;
+
 
 /* ══ Toast ══ */
 function toast(msg,dur=2200){const el=document.getElementById('toast');el.textContent=msg;el.classList.add('on');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('on'),dur);}
@@ -1406,12 +1449,61 @@ async function renderTabs() {
     const res = m.result || '';
     const t = document.createElement('div');
     t.className = 'tab' + (id === active ? ' on' : '');
+    t.dataset.sheetId = id;
+    if (id !== 'summary') t.draggable = true;
+
     let label = id === 'summary' ? '📊 Summary' : 'No.' + id.replace('no-', '');
     if (id !== 'summary' && m.location)
       label = m.location.length > 10 ? m.location.slice(0, 9) + '…' : m.location;
-    t.innerHTML = label + (res && id !== 'summary'
-      ? `<span class="tdot ${res === 'pass' ? 'p' : 'f'}"></span>` : '');
-    t.onclick = () => switchTo(id);
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'tab-label';
+    labelSpan.textContent = label;
+    t.appendChild(labelSpan);
+
+    if (res && id !== 'summary') {
+      const dot = document.createElement('span');
+      dot.className = `tdot ${res === 'pass' ? 'p' : 'f'}`;
+      t.appendChild(dot);
+    }
+
+    t.onclick = () => {
+      if (_tabPressTriggered) { _tabPressTriggered = false; return; }
+      switchTo(id);
+    };
+
+    if (id !== 'summary') {
+      const menuBtn = document.createElement('button');
+      menuBtn.type = 'button';
+      menuBtn.className = 'tab-menu-btn';
+      menuBtn.textContent = '⋮';
+      menuBtn.title = 'จัดการ Sheet';
+      menuBtn.onclick = (e) => { e.stopPropagation(); openSheetManage(id); };
+      t.appendChild(menuBtn);
+
+      const startPress = () => {
+        clearTimeout(_tabPressTimer);
+        _tabPressTriggered = false;
+        _tabPressTimer = setTimeout(() => {
+          _tabPressTriggered = true;
+          openSheetManage(id);
+        }, 450);
+      };
+      const cancelPress = () => clearTimeout(_tabPressTimer);
+      t.addEventListener('touchstart', startPress, { passive:true });
+      t.addEventListener('touchend', cancelPress, { passive:true });
+      t.addEventListener('touchmove', cancelPress, { passive:true });
+      t.addEventListener('mousedown', startPress);
+      t.addEventListener('mouseup', cancelPress);
+      t.addEventListener('mouseleave', cancelPress);
+      t.addEventListener('contextmenu', (e) => { e.preventDefault(); openSheetManage(id); });
+      t.addEventListener('dragstart', onTabDragStart);
+      t.addEventListener('dragover', onTabDragOver);
+      t.addEventListener('dragleave', onTabDragLeave);
+      t.addEventListener('drop', onTabDrop);
+      t.addEventListener('dragend', onTabDragEnd);
+    }
+
     wrap.appendChild(t);
   }
   setTimeout(() => scrollToActiveTab(true), 50);
@@ -1997,30 +2089,172 @@ window.clearAllSheets = async function(){
   toast('🗑️ ล้างข้อมูลทั้งหมดแล้ว');
 };
 
-document.getElementById('btnAdd').onclick = async () => {
+
+function sheetLabel(id){ return id === 'summary' ? 'Summary' : 'No.' + String(id).replace('no-',''); }
+function canManageSheet(id){ return id && id !== 'summary' && sheetIds.includes(id); }
+function closeSheetModal(){
+  const m = document.getElementById('sheetModal');
+  if(m) m.classList.remove('on');
+  _sheetModalCurrentId = null;
+}
+function openSheetModal(title, bodyHTML, sub=''){
+  const m = document.getElementById('sheetModal');
+  document.getElementById('sheetModalTitle').textContent = title || 'จัดการ Sheet';
+  document.getElementById('sheetModalSub').textContent = sub || '';
+  document.getElementById('sheetModalBody').innerHTML = bodyHTML || '';
+  m.classList.add('on');
+}
+async function insertSheetAt(index){
+  let idx = Number(index);
+  if (!Number.isFinite(idx)) idx = sheetIds.length;
+  idx = Math.max(1, Math.min(idx, sheetIds.length)); // ไม่ให้แทรกก่อน summary
   const n = nextNo(), id = 'no-' + n;
-  sheetIds.push(id);
+  sheetIds.splice(idx, 0, id);
   await saveSheetsList(sheetIds);
   active = id;
   await renderAll();
-  toast('➕ เพิ่ม Sheet No.' + n);
-};
-
-document.getElementById('btnDel').onclick = async () => {
-  const nonS = sheetIds.filter(id => id !== 'summary');
-  if (!nonS.length) { toast('⚠️ ไม่มี Sheet ที่ลบได้'); return; }
-  const rid = active !== 'summary' ? active : nonS[nonS.length - 1];
-  // ✅ แก้ไข #7: ลบ ) เกินออกหนึ่งตัว
-  if (!confirm(`ลบ Sheet "No.${rid.replace('no-', '')}" และรูปภาพทั้งหมด?`)) return;
+  toast('➕ แทรก Sheet No.' + n + ' แล้ว');
+  closeSheetModal();
+}
+async function moveSheetBy(id, step){
+  if (!canManageSheet(id)) return;
+  const idx = sheetIds.indexOf(id);
+  const target = idx + Number(step || 0);
+  if (idx < 1 || target < 1 || target >= sheetIds.length) {
+    toast('⚠️ ย้ายต่อไม่ได้แล้ว');
+    return;
+  }
+  const arr = [...sheetIds];
+  arr.splice(idx, 1);
+  arr.splice(target, 0, id);
+  sheetIds = arr;
+  await saveSheetsList(sheetIds);
+  await renderTabs();
+  scrollToActiveTab();
+  toast('↔️ ย้าย ' + sheetLabel(id) + ' แล้ว');
+  closeSheetModal();
+}
+async function moveSheetToIndex(id, targetIdx){
+  if (!canManageSheet(id)) return;
+  const from = sheetIds.indexOf(id);
+  let to = Number(targetIdx);
+  if (!Number.isFinite(to)) return;
+  to = Math.max(1, Math.min(to, sheetIds.length - 1));
+  if (from === to) return;
+  const arr = [...sheetIds];
+  arr.splice(from, 1);
+  arr.splice(to, 0, id);
+  sheetIds = arr;
+  await saveSheetsList(sheetIds);
+  await renderTabs();
+  scrollToActiveTab();
+  toast('↕️ จัดลำดับ ' + sheetLabel(id) + ' แล้ว');
+}
+async function deleteSheetById(rid){
+  if (!canManageSheet(rid)) { toast('⚠️ Sheet นี้ลบไม่ได้'); return; }
+  if (!confirm(`ลบ Sheet "${sheetLabel(rid)}" และรูปภาพทั้งหมด?`)) return;
   const m = await getMeta(rid);
   for (const iid of (m.imgIds || [])) await delImg(iid);
   await delMeta(rid);
   sheetIds = sheetIds.filter(id => id !== rid);
   await saveSheetsList(sheetIds);
-  active = 'summary';
+  if (active === rid) active = 'summary';
   await renderAll();
-  toast('🗑️ ลบ Sheet แล้ว');
+  toast('🗑️ ลบ ' + sheetLabel(rid) + ' แล้ว');
+  closeSheetModal();
+}
+function openDeleteSheetPicker(){
+  const nonS = sheetIds.filter(id => id !== 'summary');
+  if (!nonS.length) { toast('⚠️ ไม่มี Sheet ที่ลบได้'); return; }
+  const body = `
+    <div class="sheet-list">
+      ${nonS.map(id => `<button class="sheet-row-btn" onclick="deleteSheetById('${id}')"><span>${sheetLabel(id)}</span><span class="sheet-row-meta">เลือกลบ</span></button>`).join('')}
+    </div>`;
+  openSheetModal('เลือกลบ Sheet', body, 'แตะ Sheet ที่ต้องการลบ');
+}
+async function openSheetManage(id){
+  if (!canManageSheet(id)) { toast('⚠️ จัดการได้เฉพาะ Sheet ตรวจสอบ'); return; }
+  _sheetModalCurrentId = id;
+  const idx = sheetIds.indexOf(id);
+  const body = `
+    <div class="sheet-act-grid">
+      <button class="sheet-act-btn neutral" onclick="moveSheetBy('${id}',-1)">⬅️ ย้ายไปซ้าย</button>
+      <button class="sheet-act-btn neutral" onclick="moveSheetBy('${id}',1)">➡️ ย้ายไปขวา</button>
+      <button class="sheet-act-btn primary" onclick="insertSheetAt(${idx})">➕ แทรกก่อน</button>
+      <button class="sheet-act-btn primary" onclick="insertSheetAt(${idx+1})">➕ แทรกหลัง</button>
+      <button class="sheet-act-btn warn" onclick="switchTo('${id}'); closeSheetModal();">📄 เปิด Sheet นี้</button>
+      <button class="sheet-act-btn danger" onclick="deleteSheetById('${id}')">🗑️ ลบ Sheet นี้</button>
+    </div>`;
+  openSheetModal('จัดการ ' + sheetLabel(id), body, 'แตะค้างที่แท็บ หรือกดปุ่ม ⋮ เพื่อเปิดเมนูนี้');
+}
+function clearTabDropMarks(){
+  document.querySelectorAll('.tab.drop-left,.tab.drop-right,.tab.dragging').forEach(el => el.classList.remove('drop-left','drop-right','dragging'));
+}
+function onTabDragStart(e){
+  const id = this.dataset.sheetId;
+  if (!canManageSheet(id)) { e.preventDefault(); return; }
+  _dragSheetId = id;
+  this.classList.add('dragging');
+  try { e.dataTransfer.setData('text/plain', id); } catch(_){}
+  e.dataTransfer.effectAllowed = 'move';
+}
+function onTabDragOver(e){
+  const targetId = this.dataset.sheetId;
+  if (!_dragSheetId || !canManageSheet(targetId) || targetId === _dragSheetId) return;
+  e.preventDefault();
+  clearTabDropMarks();
+  const rect = this.getBoundingClientRect();
+  const before = (e.clientX - rect.left) < rect.width / 2;
+  this.classList.add(before ? 'drop-left' : 'drop-right');
+}
+function onTabDragLeave(){
+  this.classList.remove('drop-left','drop-right');
+}
+async function onTabDrop(e){
+  e.preventDefault();
+  const targetId = this.dataset.sheetId;
+  const dragId = _dragSheetId || (() => { try { return e.dataTransfer.getData('text/plain'); } catch(_) { return ''; } })();
+  clearTabDropMarks();
+  if (!canManageSheet(dragId) || !canManageSheet(targetId) || dragId === targetId) return;
+  const rect = this.getBoundingClientRect();
+  const before = (e.clientX - rect.left) < rect.width / 2;
+  const arr = [...sheetIds];
+  const from = arr.indexOf(dragId);
+  let to = arr.indexOf(targetId);
+  arr.splice(from, 1);
+  if (!before && from < to) to -= 0;
+  if (before && from < to) to -= 1;
+  if (!before) to += 1;
+  to = Math.max(1, Math.min(to, arr.length));
+  arr.splice(to, 0, dragId);
+  sheetIds = arr;
+  await saveSheetsList(sheetIds);
+  await renderTabs();
+  scrollToActiveTab();
+  toast('↕️ ย้ายลำดับ ' + sheetLabel(dragId) + ' แล้ว');
+}
+function onTabDragEnd(){
+  _dragSheetId = null;
+  clearTabDropMarks();
+}
+window.closeSheetModal = closeSheetModal;
+window.openSheetManage = openSheetManage;
+window.openDeleteSheetPicker = openDeleteSheetPicker;
+window.deleteSheetById = deleteSheetById;
+window.insertSheetAt = insertSheetAt;
+window.moveSheetBy = moveSheetBy;
+window.switchTo = switchTo;
+
+document.getElementById('btnAdd').onclick = async () => {
+  await insertSheetAt(sheetIds.length);
 };
+
+document.getElementById('btnDel').onclick = async () => {
+  openDeleteSheetPicker();
+};
+
+
+
 
 let _sx = 0;
 document.getElementById('lb').addEventListener('touchstart', e => _sx = e.touches[0].clientX, { passive: true });
