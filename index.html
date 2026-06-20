@@ -63,6 +63,14 @@ html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#e6eaee;font
 .pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:5px}
 .pcell{position:relative;aspect-ratio:1;border-radius:9px;overflow:hidden;background:#eee}
 .pcell img{width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in}
+/* caption ใต้รูปภาพประกอบ */
+.pcell.has-caption{aspect-ratio:auto;overflow:visible;background:transparent;border-radius:9px;display:flex;flex-direction:column;gap:4px}
+.pcell.has-caption .pic-img-wrap{position:relative;aspect-ratio:1;border-radius:9px;overflow:hidden;background:#eee;flex:0 0 auto}
+.pcell.has-caption .pic-img-wrap img{width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in}
+.img-caption{width:100%;min-height:34px;padding:6px 7px;border:1px solid #d7dde3;border-radius:7px;background:#fff;font-size:11px;line-height:1.35;font-family:inherit;resize:none;overflow:hidden;outline:none;color:#111}
+.img-caption:focus{border-color:var(--g);box-shadow:0 0 0 2px rgba(33,163,102,.12)}
+.img-caption::placeholder{color:#a0a7b0}
+
 .pdel{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;border:none;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .pedit{position:absolute;bottom:3px;right:3px;width:22px;height:22px;border-radius:50%;background:rgba(33,163,102,.85);color:#fff;border:none;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center}
 
@@ -643,6 +651,7 @@ async function loadPhotoDataURLs(sheetId) {
   try {
     const meta = await getMeta(sheetId);
     const ids  = meta?.imgIds || [];
+    const caps = meta?.imgCaps || {};
     if (!ids.length) return [];
 
     const photoIds = ids.filter(id => {
@@ -654,7 +663,7 @@ async function loadPhotoDataURLs(sheetId) {
       try {
         const src = await buildCompositeAsync(imgId);
         if (!src) return null;
-        return await new Promise(resolve => {
+        const dataUrl = await new Promise(resolve => {
           const img = new Image();
           img.onload = () => {
             try {
@@ -668,22 +677,17 @@ async function loadPhotoDataURLs(sheetId) {
               ctx.fillRect(0, 0, c.width, c.height);
               ctx.drawImage(img, 0, 0, c.width, c.height);
               resolve(c.toDataURL('image/jpeg', 0.88));
-            } catch {
-              resolve(src);
-            }
+            } catch { resolve(src); }
           };
           img.onerror = () => resolve(src);
           img.src = src;
         });
-      } catch {
-        return null;
-      }
+        return { src: dataUrl, caption: String(caps[imgId] || '') };
+      } catch { return null; }
     }));
 
     return list.filter(Boolean);
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
 /* ══ render element → canvas ══ */
@@ -891,24 +895,73 @@ function addPagedCanvasContent(pdf, canvas, addNewPageFirst = false, firstPageRe
   return { pageCount: pages, firstSliceMm };
 }
 
+
+function wrapCanvasText(ctx, text, maxWidth, maxLines) {
+  const raw = String(text || '').replace(/\r/g, '').split('\n');
+  const out = [];
+  raw.forEach(part => {
+    let line = '';
+    Array.from(part).forEach(ch => {
+      const test = line + ch;
+      if (ctx.measureText(test).width > maxWidth && line) { out.push(line); line = ch; }
+      else { line = test; }
+    });
+    out.push(line);
+  });
+  if (out.length > maxLines) {
+    out.length = maxLines;
+    out[maxLines - 1] = out[maxLines - 1].replace(/…?$/, '') + '…';
+  }
+  return out;
+}
+function makeCaptionImage(text) {
+  const cap = String(text || '').trim();
+  if (!cap) return null;
+  const W = 900, pad = 20, lineH = 30, maxLines = 4;
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d');
+  ctx.font = '24px Calibri, Arial, sans-serif';
+  const lines = wrapCanvasText(ctx, cap, W - pad * 2, maxLines);
+  c.width = W;
+  c.height = Math.max(56, pad * 2 + lines.length * lineH);
+  const cctx = c.getContext('2d');
+  cctx.fillStyle = '#ffffff'; cctx.fillRect(0, 0, c.width, c.height);
+  cctx.strokeStyle = '#cfd8e3'; cctx.lineWidth = 3; cctx.strokeRect(1.5, 1.5, c.width - 3, c.height - 3);
+  cctx.font = '24px Calibri, Arial, sans-serif'; cctx.fillStyle = '#111111'; cctx.textBaseline = 'top';
+  lines.forEach((line, i) => cctx.fillText(line, pad, pad + i * lineH));
+  return c.toDataURL('image/png');
+}
+function getPhotoSrc(item){ return (item && typeof item === 'object') ? item.src : item; }
+function getPhotoCaption(item){ return (item && typeof item === 'object') ? (item.caption || '') : ''; }
+
 function drawOneBatch(pdf, batch, startY, areaH) {
   if (!batch.length) return;
   const M  = _PDF.M;
   const PW = _PDF.CW;
-  const { cols, cw, ch, gap } = calcGrid(batch.length, PW, areaH);
-  const rows  = Math.ceil(batch.length / cols);
-  const gridH = rows * ch + (rows - 1) * gap;      /* ★ แก้ * ★ */
+  const hasCaption = batch.some(item => String(getPhotoCaption(item)).trim());
+  const capH = hasCaption ? 18 : 0;
+  const g = calcGrid(batch.length, PW, areaH);
+  const cols = g.cols;
+  const rows = Math.ceil(batch.length / cols);
+  const gap  = g.gap;
+  const rowH = Math.max(20, (areaH - (rows - 1) * gap) / rows);
+  const cw = g.cw;
+  const ch = hasCaption ? Math.max(18, Math.min(g.ch, rowH - capH)) : g.ch;
+  const gridH = rows * (ch + capH) + (rows - 1) * gap;
   const baseY = startY + Math.max(0, (areaH - gridH) / 2);
   let x = M, y = baseY, col = 0;
-  batch.forEach(durl => {
-    if (durl) {
-      pdf.addImage(durl, 'JPEG', x, y, cw, ch, undefined, 'FAST');
-    } else {
-      pdf.setFillColor(220, 220, 220);
-      pdf.rect(x, y, cw, ch, 'F');
+  batch.forEach(item => {
+    const durl = getPhotoSrc(item);
+    const cap  = String(getPhotoCaption(item) || '').trim();
+    if (durl) pdf.addImage(durl, 'JPEG', x, y, cw, ch, undefined, 'FAST');
+    else { pdf.setFillColor(220, 220, 220); pdf.rect(x, y, cw, ch, 'F'); }
+    if (capH) {
+      const capImg = makeCaptionImage(cap);
+      if (capImg) pdf.addImage(capImg, 'PNG', x, y + ch + 2, cw, capH - 2, undefined, 'FAST');
+      else { pdf.setDrawColor(207, 216, 227); pdf.setFillColor(255, 255, 255); pdf.rect(x, y + ch + 2, cw, capH - 2, 'FD'); }
     }
     col++;
-    if (col >= cols) { col = 0; x = M; y += ch + gap; }
+    if (col >= cols) { col = 0; x = M; y += ch + capH + gap; }
     else x += cw + gap;
   });
 }
@@ -972,7 +1025,8 @@ async function sheetToPDF(pdf, el, sheetId, addNewPageFirst = false) {
       const g = calcGrid(inlineCount, _PDF.CW, 70);
       const rows = Math.ceil(inlineCount / g.cols);
       const gridHmm = rows * g.ch + (rows - 1) * g.gap;
-      firstPageReservedMm = gridHmm + 4;
+      const inlineHasCaption = allDataURLs.slice(0, inlineCount).some(item => String(getPhotoCaption(item)).trim());
+      firstPageReservedMm = gridHmm + 4 + (inlineHasCaption ? rows * 18 : 0);
 
       // อนุญาตเฉพาะกรณี content ทั้งหมดพออยู่หน้าเดียวเมื่อกันที่ว่างให้รูปใต้ note
       if (naturalContentMm > (_PDF.CH - firstPageReservedMm - 2)) {
@@ -1374,6 +1428,25 @@ async function buildSheetPageAsync(id) {
   </div>`;
 }
 
+
+/* ══ Caption ใต้รูปภาพประกอบ ══ */
+function escHtml(s){
+  return String(s || '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+}
+function autoResizeCaption(el){
+  if(!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.max(34, el.scrollHeight || 34) + 'px';
+}
+window.saveImgCaption = async function(sheetId, imgId, val, el){
+  autoResizeCaption(el);
+  const m = await getMeta(sheetId);
+  const caps = Object.assign({}, m.imgCaps || {});
+  caps[imgId] = val || '';
+  await setMeta(sheetId, { imgCaps: caps });
+  showSaving(sheetId);
+};
+
 /* ══ Rebuild Grid ══ */
 async function rebuildGrid(id) {
   const grid = document.getElementById('grid-' + id);
@@ -1381,14 +1454,14 @@ async function rebuildGrid(id) {
   if (!grid) return;
   const m = await getMeta(id);
   const imgIds = m.imgIds || [];
+  const imgCaps = m.imgCaps || {};
   grid.innerHTML = '';
   const cells = [];
   imgIds.forEach((iid, i) => {
     const cell = document.createElement('div');
-    cell.className = 'pcell';
+    cell.className = 'pcell has-caption';
     cell.id = 'cell-' + iid;
-    // ✅ แก้ไข #1: เพิ่ม = ให้ innerHTML
-    cell.innerHTML = `<div class="pcell-loading" style="width:100%;height:100%">⏳</div>`;
+    cell.innerHTML = `<div class="pic-img-wrap"><div class="pcell-loading" style="width:100%;height:100%">⏳</div></div>`;
     grid.appendChild(cell);
     cells.push({ iid, i, cell });
   });
@@ -1397,12 +1470,16 @@ async function rebuildGrid(id) {
     const thumb = await buildCompositeAsync(iid);
     if (!thumb) { cell.remove(); continue; }
     const ann = !!(await loadAnnot(iid));
-    // ✅ แก้ไข #2: เพิ่ม ? ใน ternary
     const badge = ann ? `<span style="position:absolute;top:3px;left:3px;background:var(--g);color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;">✏️</span>` : '';
-    cell.innerHTML = `<img src="${thumb}" onclick="lbOpen('${id}',${i})" loading="lazy"/>
-      ${badge}
-      <button class="pdel" onclick="delPhoto('${id}','${iid}',event)">✕</button>
-      <button class="pedit" onclick="openEditor('${id}','${iid}',event)">✏️</button>`;
+    const capVal = escHtml(imgCaps[iid] || '');
+    cell.innerHTML = `<div class="pic-img-wrap">
+        <img src="${thumb}" onclick="lbOpen('${id}',${i})" loading="lazy"/>
+        ${badge}
+        <button class="pdel" onclick="delPhoto('${id}','${iid}',event)">✕</button>
+        <button class="pedit" onclick="openEditor('${id}','${iid}',event)">✏️</button>
+      </div>
+      <textarea class="img-caption" rows="1" placeholder="อธิบายรูปภาพ..." onclick="event.stopPropagation()" oninput="saveImgCaption('${id}','${iid}',this.value,this)">${capVal}</textarea>`;
+    autoResizeCaption(cell.querySelector('.img-caption'));
   }
 }
 
@@ -1586,7 +1663,9 @@ window.delPhoto = async function(id, iid, e) {
   if (!confirm('ลบรูปนี้?')) return;
   await delImg(iid);
   const m = await getMeta(id);
-  await setMeta(id, { imgIds: (m.imgIds || []).filter(x => x !== iid) });
+  const caps = Object.assign({}, m.imgCaps || {});
+  delete caps[iid];
+  await setMeta(id, { imgIds: (m.imgIds || []).filter(x => x !== iid), imgCaps: caps });
   rebuildGrid(id);
   showSaving(id);
   toast('🗑️ ลบรูปแล้ว');
