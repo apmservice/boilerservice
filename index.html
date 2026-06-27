@@ -247,6 +247,15 @@ html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#e6eaee;font
 .pdf-prog-bar-wrap{background:#eee;border-radius:20px;height:10px;overflow:hidden;margin-bottom:6px}
 .pdf-prog-bar{height:100%;background:linear-gradient(90deg,var(--g),#4ade80);border-radius:20px;transition:width .3s;width:0%}
 .pdf-prog-pct{font-size:13px;font-weight:700;color:var(--g)}
+
+/* Single small language toggle */
+.lang-toggle-one{width:32px;height:32px;border-radius:50%;border:1px solid #cfd8e3;background:#21a366;color:#fff;font-size:10.5px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.10);transition:all .15s;margin-left:auto;margin-right:8px;flex-shrink:0;line-height:1;padding:0}
+.lang-toggle-one:active{transform:scale(.94)}
+@media (max-width:520px){.lang-toggle-one{width:29px;height:29px;font-size:10px;margin-right:6px}.dbar-select{min-width:145px;max-width:185px}}
+.app-confirm{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999999;display:none;align-items:center;justify-content:center;padding:18px}
+.app-confirm.on{display:flex}.app-confirm-card{width:min(92vw,520px);background:#fff;border-radius:18px;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.28);font-family:Calibri,Arial,sans-serif;color:#111}.app-confirm-title{font-size:18px;font-weight:800;margin:0 0 12px}.app-confirm-msg{font-size:15px;line-height:1.45;color:#333;white-space:pre-wrap;margin-bottom:22px}.app-confirm-actions{display:flex;gap:10px;justify-content:flex-end}.app-confirm-btn{min-width:96px;border:none;border-radius:14px;padding:12px 18px;font-size:14px;font-weight:800;cursor:pointer}.app-confirm-ok{background:#1565c0;color:#fff}.app-confirm-cancel{background:#e8f0fe;color:#174ea6}.app-confirm-btn:active{opacity:.75;transform:scale(.98)}
+@media (max-width:520px){.app-confirm-card{width:94vw;padding:18px}.app-confirm-actions{justify-content:stretch}.app-confirm-btn{flex:1;min-width:0}}
+
 </style>
 </head>
 <body>
@@ -278,11 +287,13 @@ window.__loaderFailSafe = true;
 <div class="app">
   <div class="data-bar">
     <div class="data-bar-title">💾 ข้อมูลในเครื่อง</div>
+    <button type="button" id="langToggle" class="lang-toggle-one" onclick="toggleLang()" aria-label="Switch language" title="Switch language">En</button>
     <select id="topCommand" class="dbar-select" onchange="handleTopCommand(this)">
       <option value="">เลือกคำสั่ง…</option>
       <option value="export">📤 Export ข้อมูล</option>
       <option value="import">📥 Import ข้อมูล</option>
       <option value="clearall">🗑️ ล้างข้อมูลทั้งหมด</option>
+      <option value="exit">🚪 Exit / ออกจากโปรแกรม</option>
       
       
       
@@ -383,6 +394,18 @@ window.__loaderFailSafe = true;
     <button class="sheet-modal-close" onclick="closeSheetModal()">ปิด</button>
   </div>
 </div>
+
+<div class="app-confirm" id="appConfirm" role="dialog" aria-modal="true" aria-labelledby="appConfirmTitle">
+  <div class="app-confirm-card">
+    <div class="app-confirm-title" id="appConfirmTitle">Confirm action</div>
+    <div class="app-confirm-msg" id="appConfirmMsg"></div>
+    <div class="app-confirm-actions">
+      <button type="button" class="app-confirm-btn app-confirm-cancel" id="appConfirmCancel">Cancel</button>
+      <button type="button" class="app-confirm-btn app-confirm-ok" id="appConfirmOk">OK</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -428,6 +451,12 @@ window.handleTopCommand = async function(sel){
   if (v === 'export') await exportData();
   else if (v === 'import') document.getElementById('impFile').click();
   else if (v === 'clearall') await clearAllSheets();
+  else if (v === 'exit') {
+    if (await window.appConfirm('ต้องการออกจากโปรแกรมใช่ไหม?')) {
+      if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage({ type: 'exit' });
+      else window.close();
+    }
+  }
  } catch (e) {
   console.error(e);
   toast((e && (e.message || e)) || 'เกิดข้อผิดพลาด');
@@ -499,7 +528,7 @@ window.exportData = async function(){
 };
 window.importData=async function(inp){
   const file=inp.files[0];if(!file)return;inp.value='';
-  if(!confirm('Import จะแทนที่ข้อมูลทั้งหมด — ยืนยัน?'))return;
+  if(!(await window.appConfirm('Import จะแทนที่ข้อมูลทั้งหมด — ยืนยัน?')))return;
   toast('⏳ กำลัง Import…',5000);
   try{
     const payload=JSON.parse(await file.text());
@@ -1224,7 +1253,7 @@ function showSaving(id) {
   clearTimeout(asTimer);
   asTimer = setTimeout(async () => {
     if (dot) dot.className = 'asdot ok';
-    if (lbl) lbl.textContent = 'บันทึกอัตโนมัติแล้ว · ' +
+    if (lbl) lbl.textContent = 'Automatic saved · ' +
       new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
     refreshDot(id);
     if (active === 'summary') {
@@ -1372,7 +1401,7 @@ async function buildSheetPageAsync(id) {
     <div class="fr">
       <div class="fs" style="flex:1.2">
         <label class="fl">📅 วันที่และเวลาตรวจ</label>
-        <input class="fi" type="datetime-local" value="${dateVal}" oninput="sf('${id}','date',this.value)"/>
+        <input id="date-input-${id}" class="fi" type="text" inputmode="numeric" placeholder="yyyy-mm-dd hh:mm" value="${dateVal}" oninput="sf('${id}','date',this.value)"/>
       </div>
       <div class="fs">
         <label class="fl">👤 ผู้ตรวจ</label>
@@ -1392,18 +1421,11 @@ async function buildSheetPageAsync(id) {
     <div class="fs">
       <label class="fl">🏁 ผลการตรวจ</label>
       <div class="rg">
-        <button class="rb p ${pA}" onclick="setRes('${id}','pass',this)">✅ ผ่าน (Pass)</button>
-        <button class="rb f ${fA}" onclick="setRes('${id}','fail',this)">❌ ไม่ผ่าน (Fail)</button>
+        <button class="rb p ${pA}" onclick="setRes('${id}','pass',this)">✅ ผ่าน </button>
+        <button class="rb f ${fA}" onclick="setRes('${id}','fail',this)">❌ ไม่ผ่าน </button>
       </div>
     </div>
-   <div class="fs">
-  <label class="fl">📝 หมายเหตุ / รายละเอียด</label>
-  <textarea
-    class="ft"
-    placeholder="ระบุรายละเอียด..."
-    oninput="autoResize(this); sf('${id}','note',this.value)"
-  >${m.note || ''}</textarea>
-</div>
+
 <div class="fs">
       <label class="fl">🖼️ รูปภาพประกอบ</label>
       <div class="pgrid" id="grid-${id}"></div>
@@ -1619,7 +1641,7 @@ window.setRes = async function(id, val, btn) {
   }
   await setMeta(id, { result: newResult, date: newDate });
   // ✅ แก้ไข #4: แก้ querySelector ให้ใช้ () แทน tagged template และลบ ) เกิน
-  const dateInput = document.querySelector(`#pg-${id} input[type="datetime-local"]`);
+  const dateInput = document.getElementById(`date-input-${id}`);
   if (dateInput) dateInput.value = newDate;
   btn.closest('.rg').querySelectorAll('.rb').forEach(b => b.classList.remove('on'));
   if (newResult) {
@@ -1640,7 +1662,7 @@ window.manualSave = function(id) {
 };
 
 window.clearForm = async function(id) {
-  if (!confirm('ล้างข้อมูลและรูปภาพทั้งหมดใน Sheet นี้?')) return;
+  if (!(await window.appConfirm('ล้างข้อมูลและรูปภาพทั้งหมดใน Sheet นี้?'))) return;
   const m = await getMeta(id);
   for (const iid of (m.imgIds || [])) await delImg(iid);
   await delMeta(id);
@@ -1660,7 +1682,7 @@ window.handleFiles = async function(id, inp) {
 
 window.delPhoto = async function(id, iid, e) {
   e.stopPropagation();
-  if (!confirm('ลบรูปนี้?')) return;
+  if (!(await window.appConfirm('ลบรูปนี้?'))) return;
   await delImg(iid);
   const m = await getMeta(id);
   const caps = Object.assign({}, m.imgCaps || {});
@@ -1893,8 +1915,8 @@ window.edUndo = function() {
     .putImageData(edAnnotHistory[edAnnotHistory.length - 1], 0, 0);
 };
 
-window.edClearAnnot = function() {
-  if (!confirm('ล้าง annotation?')) return;
+window.edClearAnnot = async function() {
+  if (!(await window.appConfirm('ล้าง annotation?'))) return;
   annotCanvas.getContext('2d')
     .clearRect(0, 0, annotCanvas.width, annotCanvas.height);
   edAnnotHistory = [edAnnotHistory[0]];
@@ -2152,7 +2174,7 @@ window.clearAllSheets = async function(){
   const total = nonS.length;
   const hasSummary = !!((await dbGet('summary_title')) || (await dbGet('summary_inspector')));
   if (!total && !hasSummary) { toast('⚠️ ไม่มีข้อมูลให้ล้าง'); return; }
-  if (!confirm(`ล้างข้อมูลทุก Sheet ทั้งหมด ${total} รายการ รวมถึงข้อมูลหน้า Summary และรูปภาพทั้งหมด?`)) return;
+  if (!(await window.appConfirm(`ล้างข้อมูลทุก Sheet ทั้งหมด ${total} รายการ รวมถึงข้อมูลหน้า Summary และรูปภาพทั้งหมด?`))) return;
   for (const rid of [...nonS]) {
     const m = await getMeta(rid);
     for (const iid of (m.imgIds || [])) await delImg(iid);
@@ -2182,6 +2204,7 @@ function openSheetModal(title, bodyHTML, sub=''){
   document.getElementById('sheetModalSub').textContent = sub || '';
   document.getElementById('sheetModalBody').innerHTML = bodyHTML || '';
   m.classList.add('on');
+  setTimeout(()=>window.setLang && window.setLang(window.getLang ? window.getLang() : 'en'), 0);
 }
 async function insertSheetAt(index){
   let idx = Number(index);
@@ -2231,7 +2254,7 @@ async function moveSheetToIndex(id, targetIdx){
 }
 async function deleteSheetById(rid){
   if (!canManageSheet(rid)) { toast('⚠️ Sheet นี้ลบไม่ได้'); return; }
-  if (!confirm(`ลบ Sheet "${sheetLabel(rid)}" และรูปภาพทั้งหมด?`)) return;
+  if (!(await window.appConfirm(`ลบ Sheet "${sheetLabel(rid)}" และรูปภาพทั้งหมด?`))) return;
   const m = await getMeta(rid);
   for (const iid of (m.imgIds || [])) await delImg(iid);
   await delMeta(rid);
@@ -2360,5 +2383,23 @@ async function init() {
 }
 init();
 </script>
+
+<script id="finalLanguageAndConfirmScript">
+(function(){
+  const STORE_KEY='scgp_boiler_lang_ui_v5';
+  let currentLang=localStorage.getItem(STORE_KEY)||'en';
+  const pairs=[
+    ['กำลังโหลดข้อมูล…','Loading data…'],['📄 กำลังสร้าง PDF รวม…','📄 Creating combined PDF…'],['เตรียมข้อมูล…','Preparing data…'],['💾 ข้อมูลในเครื่อง','💾 Local Data'],['เลือกคำสั่ง…','Select command…'],['📤 Export ข้อมูล','📤 Export Data'],['📥 Import ข้อมูล','📥 Import Data'],['🗑️ ล้างข้อมูลทั้งหมด','🗑️ Clear All Data'],['🚪 Exit / ออกจากโปรแกรม','🚪 Exit'],['✕ ปิด','✕ Close'],['✏️ แก้ไขรูป','✏️ Edit Image'],['⬇️ บันทึก','⬇️ Save'],['เครื่องหมายถูก','Check mark'],['เครื่องหมายผิด','Cross mark'],['รูป','Image'],['annot','Annotation'],['ขนาด','Size'],['✕ ยกเลิก','✕ Cancel'],['✅ บันทึกรูป','✅ Save Image'],['จัดการ Sheet','Manage Sheet'],['ปิด','Close'],['เกิดข้อผิดพลาด','An error occurred'],['เกิดข้อผิดพลาด กรุณาลองใหม่','An error occurred. Please try again'],['ต้องการออกจากโปรแกรมใช่ไหม?','Do you want to exit the application?'],['Import จะแทนที่ข้อมูลทั้งหมด — ยืนยัน?','Import will replace all data. Continue?'],['ไฟล์ไม่ถูกต้อง','Invalid file'],['⏳ กำลัง Export…','⏳ Exporting…'],['✅ Export สำเร็จ!','✅ Export completed!'],['⏳ กำลัง Import…','⏳ Importing…'],['✅ Import สำเร็จ!','✅ Import completed!'],['⏳ กำลังบันทึกรูป…','⏳ Saving image…'],['เกิดข้อผิดพลาดในการอ่านรูปภาพ','Error reading image'],['Boiler Service — ภาพรวมทั้งหมด','Boiler Service — Overall Summary'],['📋 ชื่อที่ตั้ง / สถานที่','📋 Site / Location'],['พิมพ์ชื่อที่ตั้ง / สถานที่…','Enter site / location…'],['👤 ผู้ตรวจ','👤 Inspector'],['พิมพ์ชื่อผู้ตรวจ','Enter inspector name'],['✅ ผ่าน','✅ Pass'],['❌ ไม่ผ่าน','❌ Fail'],['⏳ รอผล','⏳ Pending'],['ผ่าน','Pass'],['ไม่ผ่าน','Fail'],['รอ','Pending'],['รอผล','Pending'],['ยังไม่มี Sheet','No sheets yet'],['💾 ข้อมูลบันทึกใน Browser · Export JSON เพื่อย้ายเครื่อง','💾 Data is saved in this browser · Export JSON to move device'],['📄 PDF ทุก Sheet','📄 PDF All Sheets'],['↗️ Share ทุก Sheet','↗️ Share All Sheets'],['พร้อมบันทึกอัตโนมัติ','Ready for autosave'],['📅 วันที่และเวลาตรวจ','📅 Inspection Date & Time'],['ชื่อ-นามสกุล','Full name'],['⚙️ ชื่อเครื่องจักร / อุปกรณ์','⚙️ Machine / Equipment Name'],['เช่น Boiler #1, Feed Pump A','e.g. Boiler #1, Feed Pump A'],['🏁 ผลการตรวจ','🏁 Inspection Result'],['✅ ผ่าน ','✅ Pass'],['❌ ไม่ผ่าน','❌ Fail'],['🖼️ รูปภาพประกอบ','🖼️ Supporting Photos'],['ถ่ายรูป\nจากกล้อง','Take Photo\nCamera'],['เลือกจาก\nแกลเลอรี่','Select from\nGallery'],['💾 บันทึก','💾 Save'],['🗑️ ล้าง','🗑️ Clear'],['อธิบายรูปภาพ...','Describe photo...'],['บันทึกแล้ว','Saved'],['บันทึกอัตโนมัติแล้ว','Autosaved'],['💾 บันทึกแล้ว!','💾 Saved!'],['ล้างข้อมูลและรูปภาพทั้งหมดใน Sheet นี้?','Clear all data and photos in this sheet?'],['🗑️ ล้างข้อมูลแล้ว','🗑️ Data cleared'],['ลบรูปนี้?','Delete this photo?'],['🗑️ ลบรูปแล้ว','🗑️ Photo deleted'],['⬇️ บันทึกรูปแล้ว','⬇️ Image saved'],['ไม่พบรูปภาพ','Image not found'],['ไม่มีอะไรให้ย้อนกลับ','Nothing to undo'],['ล้าง annotation?','Clear annotation?'],['🗑️ ล้างแล้ว','🗑️ Cleared'],['✅ บันทึกรูป+annotation แล้ว','✅ Image + annotation saved'],['⚠️ ไม่มีข้อมูลให้ล้าง','⚠️ No data to clear'],['🗑️ ล้างข้อมูลทั้งหมดแล้ว','🗑️ All data cleared'],['⚠️ ย้ายต่อไม่ได้แล้ว','⚠️ Cannot move further'],['⚠️ Sheet นี้ลบไม่ได้','⚠️ This sheet cannot be deleted'],['⚠️ ไม่มี Sheet ที่ลบได้','⚠️ No sheet can be deleted'],['เลือกลบ','Select Delete'],['เลือกลบ Sheet','Select Sheet to Delete'],['แตะ Sheet ที่ต้องการลบ','Tap the sheet to delete'],['⚠️ จัดการได้เฉพาะ Sheet ตรวจสอบ','⚠️ Only inspection sheets can be managed'],['⬅️ ย้ายไปซ้าย','⬅️ Move Left'],['➡️ ย้ายไปขวา','➡️ Move Right'],['➕ แทรกก่อน','➕ Insert Before'],['➕ แทรกหลัง','➕ Insert After'],['📄 เปิด Sheet นี้','📄 Open This Sheet'],['🗑️ ลบ Sheet นี้','🗑️ Delete This Sheet'],['แตะค้างที่แท็บ หรือกดปุ่ม ⋮ เพื่อเปิดเมนูนี้','Long press the tab or press ⋮ to open this menu'],['เกิดข้อผิดพลาด กรุณา Refresh','An error occurred. Please refresh'],['ไม่พบไลบรารี jsPDF','jsPDF library not found'],['✅ Export PDF สำเร็จ!','✅ PDF export completed!'],['✅ Share สำเร็จ!','✅ Share completed!'],['📥 บันทึก PDF','📥 PDF saved'],['⏳ กำลังเตรียม Share…','⏳ Preparing share…'],['ยกเลิก Share','Share cancelled'],['ไม่พบข้อมูล','No data found'],['กำลังบันทึก…','Saving…'],['เสร็จ!','Done!'],['ยืนยันการดำเนินการ','Confirm action'],['ตกลง','OK'],['ยกเลิก','Cancel']
+  ];
+  const thToEn=new Map(pairs), enToTh=new Map(pairs.map(([th,en])=>[en,th]));
+  function dynamicTranslate(s,lang){let out=String(s||''); if(lang==='en'){out=out.replace(/จัดการ (No\.\d+)/g,'Manage $1').replace(/ล้างข้อมูลทุก Sheet ทั้งหมด (\d+) รายการ รวมถึงข้อมูลหน้า Summary และรูปภาพทั้งหมด\?/g,'Clear all $1 sheets including Summary data and all photos?').replace(/ลบ Sheet "(.+?)" และรูปภาพทั้งหมด\?/g,'Delete sheet "$1" and all photos?').replace(/สรุปผล \((\d+) รายการ\)/g,'Summary ($1 items)').replace(/(\d+) รายการ/g,'$1 items').replace(/(\d+) รูปแล้ว/g,'$1 photos added').replace(/(\d+) รูป/g,'$1 photos').replace(/รูป (\d+) ใบ/g,'$1 photos').replace(/กำลังสร้าง (\d+)\/(\d+) —/g,'Creating $1/$2 —').replace(/↔️ ย้าย /g,'↔️ Moved ').replace(/↕️ จัดลำดับ /g,'↕️ Reordered ').replace(/➕ แทรก Sheet No\./g,'➕ Inserted Sheet No.').replace(/ แล้ว/g,'').replace(/ไม่ผ่าน/g,'Fail').replace(/ผ่าน/g,'Pass').replace(/รอผล/g,'Pending').replace(/รอ/g,'Pending');} else {out=out.replace(/Manage (No\.\d+)/g,'จัดการ $1').replace(/Clear all (\d+) sheets including Summary data and all photos\?/g,'ล้างข้อมูลทุก Sheet ทั้งหมด $1 รายการ รวมถึงข้อมูลหน้า Summary และรูปภาพทั้งหมด?').replace(/Delete sheet "(.+?)" and all photos\?/g,'ลบ Sheet "$1" และรูปภาพทั้งหมด?').replace(/Summary \((\d+) items\)/g,'สรุปผล ($1 รายการ)').replace(/(\d+) items/g,'$1 รายการ').replace(/(\d+) photos added/g,'$1 รูปแล้ว').replace(/(\d+) photos/g,'$1 รูป').replace(/Creating (\d+)\/(\d+) —/g,'กำลังสร้าง $1/$2 —').replace(/↔️ Moved /g,'↔️ ย้าย ').replace(/↕️ Reordered /g,'↕️ จัดลำดับ ').replace(/➕ Inserted Sheet No\./g,'➕ แทรก Sheet No.').replace(/Fail/g,'ไม่ผ่าน').replace(/Pass/g,'ผ่าน').replace(/Pending/g,'รอผล');} return out;}
+  function tr(s,lang=currentLang){if(s==null)return'';const str=String(s),lead=(str.match(/^\s*/)||[''])[0],tail=(str.match(/\s*$/)||[''])[0],core=str.trim(),map=lang==='en'?thToEn:enToTh;return map.has(core)?lead+map.get(core)+tail:dynamicTranslate(str,lang);}
+  function applyLang(lang){currentLang=lang||'en';localStorage.setItem(STORE_KEY,currentLang);document.documentElement.lang=currentLang;const btn=document.getElementById('langToggle');if(btn){btn.textContent=currentLang==='en'?'En':'Th';btn.title=currentLang==='en'?'Switch to Thai':'Switch to English';btn.setAttribute('aria-label',btn.title);}const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let n;while(n=walker.nextNode()){const p=n.parentElement;if(!p||['SCRIPT','STYLE','TEXTAREA','INPUT','CANVAS'].includes(p.tagName))continue;const nv=tr(n.nodeValue,currentLang);if(nv!==n.nodeValue)n.nodeValue=nv;}document.querySelectorAll('[placeholder],[title],[aria-label]').forEach(el=>{['placeholder','title','aria-label'].forEach(a=>{const v=el.getAttribute(a);if(v){const nv=tr(v,currentLang);if(nv!==v)el.setAttribute(a,nv);}});});}
+  let timer=null;function queueApply(){clearTimeout(timer);timer=setTimeout(()=>applyLang(currentLang),50);} window.setLang=applyLang;window.getLang=()=>currentLang;window.toggleLang=()=>applyLang(currentLang==='en'?'th':'en');window.translateAppText=(s)=>tr(String(s),currentLang);
+  window.appConfirm=function(message,title){return new Promise(resolve=>{const box=document.getElementById('appConfirm'),msg=document.getElementById('appConfirmMsg'),ttl=document.getElementById('appConfirmTitle'),ok=document.getElementById('appConfirmOk'),cancel=document.getElementById('appConfirmCancel');const btnLang=((document.getElementById('langToggle')||{}).textContent||currentLang||'en').trim().toLowerCase();const modalLang=btnLang==='th'?'th':'en';ttl.textContent=title?tr(title,modalLang):(modalLang==='th'?'ยืนยันการดำเนินการ':'Confirm action');msg.textContent=tr(message||'',modalLang);ok.textContent=modalLang==='th'?'ตกลง':'OK';cancel.textContent=modalLang==='th'?'ยกเลิก':'Cancel';const done=(val)=>{box.classList.remove('on');ok.onclick=null;cancel.onclick=null;box.onclick=null;document.removeEventListener('keydown',onKey,true);resolve(val);};const onKey=(e)=>{if(e.key==='Escape')done(false);if(e.key==='Enter')done(true);};ok.onclick=()=>done(true);cancel.onclick=()=>done(false);box.onclick=e=>{if(e.target===box)done(false);};document.addEventListener('keydown',onKey,true);box.classList.add('on');setTimeout(()=>ok.focus(),30);});};
+  document.addEventListener('DOMContentLoaded',function(){if(!localStorage.getItem(STORE_KEY)){currentLang='en';}applyLang(currentLang);new MutationObserver(queueApply).observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['placeholder','title','aria-label']});setTimeout(function(){if(typeof window.toast==='function'&&!window.toast.__i18nWrapped){const old=window.toast;const wrapped=function(msg,ms){return old(tr(String(msg||''),currentLang),ms);};wrapped.__i18nWrapped=true;window.toast=wrapped;}queueApply();},150);});
+})();
+</script>
+
 </body>
 </html>
